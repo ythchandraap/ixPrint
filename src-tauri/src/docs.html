@@ -1,0 +1,799 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ix.print API</title>
+<style>
+:root {
+	--bg: #f5f5f5;
+	--surface: #ffffff;
+	--text: #1f2937;
+	--muted: #6b7280;
+	--line: #e5e7eb;
+	--brand: oklch(62.3% 0.214 259.815);
+	--brand-soft: oklch(88.2% 0.059 254.128);
+	--brand-ink: oklch(37.9% 0.146 265.522);
+	--code-bg: #0f172a;
+	--code-text: #e2e8f0;
+	--ok: #16a34a;
+	--warn: #b45309;
+	--danger: #dc2626;
+	--get: #0e7490;
+	--post: #7c3aed;
+	color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #18181b;
+		--surface: #27272a;
+		--text: #f4f4f5;
+		--muted: #a1a1aa;
+		--line: #3f3f46;
+		--brand-soft: oklch(32% 0.08 260);
+		--brand-ink: oklch(90% 0.05 255);
+		--code-bg: #0b1020;
+		color-scheme: dark;
+	}
+}
+* { box-sizing: border-box; }
+body {
+	margin: 0;
+	font: 15px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+	background: var(--bg);
+	color: var(--text);
+}
+a { color: var(--brand); }
+code, pre, .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+header {
+	background: var(--brand-soft);
+	padding: 20px 24px;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 12px 24px;
+}
+header h1 { margin: 0; color: var(--brand-ink); font-size: 22px; }
+header .base { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+header .base code { background: var(--surface); padding: 4px 8px; border-radius: 6px; }
+header .token-box { margin-left: auto; }
+header .token-box input { width: 280px; background: var(--surface); }
+header .token-box button { padding: 5px 10px; font-size: 13px; }
+.layout { display: flex; max-width: 1200px; margin: 0 auto; }
+nav {
+	width: 220px;
+	flex: none;
+	padding: 20px 12px;
+	position: sticky;
+	top: 0;
+	align-self: flex-start;
+	max-height: 100vh;
+	overflow-y: auto;
+}
+nav a {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	padding: 5px 8px;
+	border-radius: 6px;
+	text-decoration: none;
+	color: var(--text);
+	font-size: 14px;
+}
+nav a:hover { background: var(--surface); }
+nav .group { font-size: 12px; font-weight: 600; color: var(--muted); margin: 14px 8px 4px; text-transform: uppercase; }
+main { flex: 1; min-width: 0; padding: 20px 24px 80px; }
+section { margin-bottom: 36px; scroll-margin-top: 12px; }
+h2 { font-size: 20px; margin: 0 0 8px; }
+h3 { font-size: 15px; margin: 18px 0 6px; }
+p { margin: 6px 0; }
+.card {
+	background: var(--surface);
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	padding: 16px 18px;
+}
+.endpoint-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.method {
+	font: 600 12px ui-monospace, Menlo, Consolas, monospace;
+	padding: 2px 8px;
+	border-radius: 6px;
+	color: #fff;
+}
+.method.GET { background: var(--get); }
+.method.POST { background: var(--post); }
+.path { font-size: 15px; font-weight: 600; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; }
+td code { white-space: nowrap; }
+.table-wrap { overflow-x: auto; }
+.try {
+	margin-top: 14px;
+	border-top: 1px dashed var(--line);
+	padding-top: 14px;
+}
+.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); min-width: 0; }
+.field.wide { grid-column: 1 / -1; }
+input, select {
+	font: inherit;
+	font-size: 14px;
+	color: var(--text);
+	background: var(--bg);
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	padding: 6px 8px;
+	width: 100%;
+	min-width: 0;
+}
+input:focus, select:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
+details.more > summary { cursor: pointer; font-size: 13px; color: var(--brand); margin: 10px 0 6px; }
+.actions { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+button {
+	font: inherit;
+	font-weight: 500;
+	border-radius: 8px;
+	padding: 7px 16px;
+	cursor: pointer;
+	border: 1px solid var(--brand);
+	background: var(--brand);
+	color: #fff;
+}
+button.ghost { background: var(--surface); color: var(--text); border-color: var(--line); }
+button:disabled { opacity: 0.5; cursor: default; }
+.response { margin-top: 12px; }
+.response .meta { font-size: 13px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+.status-ok { color: var(--ok); font-weight: 600; }
+.status-err { color: var(--danger); font-weight: 600; }
+pre {
+	background: var(--code-bg);
+	color: var(--code-text);
+	padding: 12px 14px;
+	border-radius: 8px;
+	overflow-x: auto;
+	margin: 6px 0 0;
+	max-height: 360px;
+}
+.job {
+	margin-top: 8px;
+	padding: 8px 12px;
+	border-radius: 8px;
+	font-size: 14px;
+	background: var(--brand-soft);
+	color: var(--brand-ink);
+}
+.job.error, .job.failed { background: #fef2f2; color: var(--danger); }
+.job.completed { background: #dcfce7; color: #166534; }
+.tabs { display: flex; gap: 4px; margin-top: 14px; }
+.tabs button { background: none; border: none; color: var(--muted); padding: 4px 10px; border-bottom: 2px solid transparent; border-radius: 0; }
+.tabs button.on { color: var(--brand); border-bottom-color: var(--brand); }
+.copy { float: right; font-size: 12px; padding: 2px 8px; }
+textarea.json-body {
+	font: 13px ui-monospace, Menlo, Consolas, monospace;
+	color: var(--text);
+	background: var(--bg);
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	padding: 8px;
+	width: 100%;
+	resize: vertical;
+}
+.note { font-size: 13px; color: var(--muted); }
+.badge { font-size: 11px; padding: 1px 6px; border-radius: 999px; background: var(--line); color: var(--text); }
+@media (max-width: 800px) {
+	nav { display: none; }
+	main { padding: 16px; }
+	header { padding: 16px; }
+}
+</style>
+</head>
+<body>
+<header>
+	<h1>ix.print API</h1>
+	<div class="base">
+		<span class="note">Base URL:</span>
+		<code id="base-url"></code>
+		<span class="note" id="lan-note"></span>
+	</div>
+	<label class="base token-box">
+		<span class="note">Token:</span>
+		<input id="token" type="password" autocomplete="off" placeholder="fxp_… (when required)">
+		<button type="button" class="ghost" id="token-show">Show</button>
+	</label>
+</header>
+
+<div class="layout">
+	<nav id="nav">
+		<div class="group">Guide</div>
+		<a href="#intro">Introduction</a>
+		<a href="#auth">Authentication</a>
+		<a href="#settings">Print parameters</a>
+		<a href="#jobstatus">Job status</a>
+		<a href="#callback">Print result callback</a>
+		<a href="#errors">Error</a>
+		<div class="group">Endpoint</div>
+	</nav>
+
+	<main>
+		<section id="intro">
+			<h2>Introduction</h2>
+			<div class="card">
+				<p>ix.print receives PDFs from a web app over HTTP and prints them silently on a printer connected to this computer.
+				The server is available on the local network at the configured port; access is protected by a
+				<a href="#auth">token</a> by default. Web apps calling the API from a browser must be listed in
+				ix.print → Settings → API → <b>Allowed websites</b>; requests from other websites are rejected. A printer on another ix.print computer can also be reached by forwarding one server-to-server job over the LAN.</p>
+				<h3>Typical flow</h3>
+				<ol>
+					<li>Fetch the printer list (<code>GET /list-printer</code>) and presets (<code>GET /presets</code>) if needed.</li>
+					<li>Send a PDF to <code>POST /print</code> as <code>multipart/form-data</code> (the first file field is used), with settings in the query string — or, for a designed preset, send JSON data to the same endpoint.</li>
+			<li>Save the <code>job_id</code> from the response, then poll <code>GET /job-status</code> for queue position, printer errors or completion.</li>
+				</ol>
+				<h3>Settings precedence</h3>
+				<p>Request parameters → preset (<code>preset=…</code> or this computer's default preset) → built-in defaults.
+				Printer: <code>printer</code> in the request → printer in the preset → ix.print default printer → system default printer.</p>
+				<p class="note">Presets and the default printer can only be changed from the ix.print window, not through the API.</p>
+			</div>
+		</section>
+
+		<section id="auth">
+			<h2>Authentication</h2>
+			<div class="card">
+				<p>Tokens are created in the ix.print window → <b>API</b> tab (one token per application; tokens can be revoked at any time).
+				<b>Require a token</b> is enabled by default: every endpoint except <code>/</code> and <code>/docs</code> rejects requests without a token with <b>401</b>.
+				Invalid or revoked tokens are always rejected.</p>
+				<p>Send the token in one of these ways (in recommended order):</p>
+				<pre>Authorization: Bearer fxp_…
+X-Api-Token: fxp_…
+?token=fxp_…      // convenient, but recorded in logs and browser history</pre>
+				<p class="note">Fill in the <b>Token</b> field above so the "Try it" buttons and code examples on this page use your token. The token is stored only in this browser.
+				Do not put a token in public-page JavaScript; keep it on your web app's server where possible.</p>
+			</div>
+		</section>
+
+		<section id="settings">
+			<h2>Print parameters</h2>
+			<div class="card">
+				<p>Used by <code>POST /print</code> and <code>POST /test-page</code>. All are optional; empty values count as unset.</p>
+				<div class="table-wrap"><table id="settings-table"><thead><tr><th>Parameter</th><th>Values</th><th>Default</th><th>Description</th></tr></thead><tbody></tbody></table></div>
+			</div>
+		</section>
+
+		<section id="jobstatus">
+			<h2>Job status</h2>
+			<div class="card">
+				<p><code>GET /job-status</code> and the <code>status</code> field in the <code>/print</code> response contain <code>state</code>:</p>
+				<div class="table-wrap"><table>
+					<thead><tr><th>state</th><th>Meaning</th></tr></thead>
+					<tbody>
+						<tr><td><code>queued</code></td><td>Waiting in the queue. <code>position</code> = order, <code>ahead</code> = jobs ahead.</td></tr>
+						<tr><td><code>printing</code></td><td>Printing.</td></tr>
+						<tr><td><code>paused</code></td><td>Held / queue paused.</td></tr>
+						<tr><td><code>error</code></td><td>The job or printer has a problem (out of paper, jam, offline…); see <code>message</code> / <code>printer_message</code>. It may continue after the problem is fixed.</td></tr>
+						<tr><td><code>completed</code></td><td>Printed successfully.</td></tr>
+						<tr><td><code>gone</code></td><td>Left the queue without a known result (e.g. cancelled).</td></tr>
+						<tr><td><code>failed</code></td><td>ix.print could not send the job; <code>message</code> explains why.</td></tr>
+					</tbody>
+				</table></div>
+				<p class="note">Poll every 2–3 seconds until <code>completed</code>, <code>gone</code> or <code>failed</code>. Jobs are looked up in today's and yesterday's history.</p>
+			</div>
+		</section>
+
+		<section id="callback">
+			<h2>Print result callback</h2>
+			<div class="card">
+				<p>Instead of polling <code>/job-status</code>, send <code>callback_url</code> (a query parameter on the <code>/print</code> upload and <code>/test-page</code>, or a field in the JSON body).
+				When the job finishes, ix.print sends a JSON <code>POST</code> to that URL. The <code>/print</code> response then contains <code>"callback": {"status": "watching"}</code>.</p>
+				<pre><code>{
+  "event": "job.finished",
+  "job_id": "…",
+  "reference": "ORDER-42",
+  "success": true,
+  "state": "completed",
+  "message": null,
+  "printer": "EPSON_TM_T82",
+  "preset": "struk",
+  "sheets": 1,
+  "time": "2026-09-22T10:15:03+07:00"
+}</code></pre>
+				<div class="table-wrap"><table>
+					<thead><tr><th>state</th><th>success</th><th>Meaning</th></tr></thead>
+					<tbody>
+						<tr><td><code>completed</code></td><td>true</td><td>Printed successfully.</td></tr>
+						<tr><td><code>sent</code></td><td>true</td><td>Sent to the printer; the spooler did not report the job status.</td></tr>
+						<tr><td><code>failed</code></td><td>false</td><td>ix.print could not send the job; see <code>message</code>.</td></tr>
+						<tr><td><code>gone</code></td><td>false</td><td>Left the queue without completing (e.g. cancelled).</td></tr>
+						<tr><td><code>timeout</code></td><td>false</td><td>Not completed after 60 minutes.</td></tr>
+					</tbody>
+				</table></div>
+				<p>If the printer has a problem (out of paper, jam, offline) before completion, one <code>"event": "job.problem"</code> is sent with <code>"state": "error"</code>, <code>"success": null</code> and <code>message</code>; <code>job.finished</code> still follows.
+				Requests rejected at the start (400/500) do not trigger a callback: the result is already in the response.</p>
+				<p><b>Delivery:</b> success means your server responds with 2xx within 10 seconds; otherwise ix.print retries after 5 seconds, 30 seconds and 2 minutes. Redirects are not followed.
+				A job may be delivered more than once, so process it idempotently using <code>job_id</code> + <code>event</code>.</p>
+				<p><b>Verification:</b> every callback is signed with the token used to print. The <code>X-IxPrint-Timestamp</code> header (Unix seconds) and
+				<code>X-IxPrint-Signature: sha256=&lt;hex&gt;</code> = HMAC-SHA256 over <code>"{timestamp}.{raw body}"</code>, using the token's SHA-256 hex as the key.
+				Reject it when the signature does not match or the timestamp is more than 5 minutes old.</p>
+				<pre><code>// Node.js (Express: app.post(url, express.raw({ type: "application/json" }), …))
+const crypto = require("crypto");
+const key = crypto.createHash("sha256").update(process.env.IXPRINT_TOKEN).digest("hex");
+const ts = req.get("X-IxPrint-Timestamp");
+const expected = Buffer.from("sha256=" + crypto.createHmac("sha256", key).update(`${ts}.${req.body}`).digest("hex"));
+const given = Buffer.from(req.get("X-IxPrint-Signature") || "");
+const ok = Math.abs(Date.now() / 1000 - Number(ts)) &lt; 300 &amp;&amp;
+  given.length === expected.length &amp;&amp; crypto.timingSafeEqual(given, expected);</code></pre>
+				<pre><code>// PHP
+$body = file_get_contents('php://input');
+$ts = $_SERVER['HTTP_X_IXPRINT_TIMESTAMP'] ?? '';
+$key = hash('sha256', getenv('IXPRINT_TOKEN'));
+$expected = 'sha256=' . hash_hmac('sha256', $ts . '.' . $body, $key);
+$ok = abs(time() - (int) $ts) &lt; 300 &amp;&amp; hash_equals($expected, $_SERVER['HTTP_X_IXPRINT_SIGNATURE'] ?? '');</code></pre>
+				<p class="note">Callbacks require a token (without one: 400). Up to 200 jobs are monitored at once; above that limit the job is still printed and the response contains <code>"callback": {"status": "refused", …}</code>.</p>
+			</div>
+		</section>
+
+		<section id="errors">
+			<h2>Errors</h2>
+			<div class="card">
+				<p>Errors are returned as JSON <code>{"message": "…"}</code>:</p>
+				<ul>
+					<li><b>400</b> — invalid parameter, missing preset, missing printer, or paper size exceeds the printer limit.</li>
+					<li><b>401</b> — token missing (when required), invalid or revoked.</li>
+					<li><b>404</b> — printer or job not found (read endpoint).</li>
+					<li><b>413</b> — file lebih dari 200 MB.</li>
+					<li><b>500</b> — document could not be opened or the printer rejected the job.</li>
+				</ul>
+			</div>
+		</section>
+
+		<div id="endpoints"></div>
+	</main>
+</div>
+
+<script>
+"use strict";
+
+const BASE = location.origin;
+const LAN_URL = "{{LAN_URL}}";
+
+const PRINT_PARAMS = [
+	{ name: "preset", kind: "preset", values: "preset name", def: "default preset", desc: "Preset saved on this computer." },
+	{ name: "printer", kind: "printer", values: "printer name", def: "see precedence", desc: "Legacy alias: printer_name." },
+	{ name: "copies", kind: "number", min: 1, max: 999, values: "1–999", def: "1" },
+	{ name: "collate", kind: "select", options: ["true", "false"], values: "true / false", def: "true", desc: "true = 1,2,3 · 1,2,3; false = 1,1 · 2,2." },
+	{ name: "orientation", kind: "select", options: ["auto", "portrait", "landscape"], values: "auto, portrait, landscape", def: "auto", desc: "For custom/roll sizes: rotate the content while keeping the paper fixed." },
+	{ name: "paper", kind: "text", list: ["default", "A4", "A5", "Letter", "Legal", "F4", "58mm", "80mm", "100x150mm", "60x75mm"], values: "default, A3–A6, B5, Letter, Legal, F4, roll 80mm, custom 100x150mm / 4x6in", def: "default", desc: "Roll: fixed width, length follows content. Custom uses exactly the specified width × length." },
+	{ name: "scale", kind: "text", list: ["shrink", "fit", "none", "90%"], values: "shrink, fit, none, percentage (90%)", def: "shrink", desc: "shrink = reduce when needed; it never enlarges." },
+	{ name: "align", kind: "select", options: ["center", "top", "top-left"], values: "center, top, top-left", def: "center" },
+	{ name: "margins", kind: "text", placeholder: "5 or 5,3 or 5,3,5,3", values: "mm: 5 / 5,3 / 5,3,5,3", def: "0", desc: "Order: top, right, bottom, left." },
+	{ name: "offset_x", kind: "number", step: "any", values: "mm", def: "0", desc: "+ moves right." },
+	{ name: "offset_y", kind: "number", step: "any", values: "mm", def: "0", desc: "+ moves down." },
+	{ name: "pages", kind: "text", placeholder: "1-3,5,8-", values: "1-3,5,8-", def: "all", desc: "Page range to print." },
+	{ name: "duplex", kind: "select", options: ["off", "long-edge", "short-edge"], values: "off, long-edge, short-edge", def: "printer" },
+	{ name: "color", kind: "select", options: ["color", "grayscale"], values: "color, grayscale", def: "printer" },
+	{ name: "tray", kind: "text", values: "tray name", def: "printer", desc: "See /printer-capabilities." },
+	{ name: "dpi", kind: "number", min: 72, max: 600, values: "72–600", def: "printer, max. 300", desc: "Raster resolution on Windows." },
+];
+
+const CALLBACK_PARAMS = [
+		{ name: "callback_url", kind: "text", placeholder: "https://app.example.com/api/print-callback", values: "http(s) URL", def: "—", desc: 'Print result is sent here (JSON POST). Requires a token. See <a href="#callback">Callback</a>.' },
+	{ name: "callback_ref", kind: "text", values: "text, max. 200", def: "—", desc: "Your ID (e.g. order number), returned in the callback as <code>reference</code>." },
+];
+
+const ENDPOINTS = [
+	{
+		id: "health", group: "General", method: "GET", path: "/", title: "Check server",
+		desc: "Returns <code>Hello, world!</code> when the server is running.",
+		params: [],
+	},
+	{
+		id: "list-printer", group: "Printer", method: "GET", path: "/list-printer", title: "List printers",
+		desc: "Local printers plus printers forwarded from another ix.print computer. <code>message</code> explains problems (out of paper, offline…); <code>is_default</code> = the printer ix.print uses when none is specified; <code>remote</code> names the other ix.print computer when present.",
+		params: [],
+		example: '[{"name":"EPSON_TM_T82","status":"Normal","message":null,"shared":"False","os_default":false,"is_default":true,"remote":null}]',
+	},
+	{
+		id: "printer-capabilities", group: "Printer", method: "GET", path: "/printer-capabilities", title: "Printer capabilities",
+		desc: "Paper sizes, trays, duplex, colour and the maximum size accepted by the driver. Without <code>printer</code> = default printer.",
+		params: [{ name: "printer", kind: "printer", values: "printer name", def: "default printer" }],
+	},
+	{
+		id: "queue", group: "Printer", method: "GET", path: "/queue", title: "Printer queue",
+		desc: "Printer status and all jobs in its queue (position, status, printed pages).",
+		params: [{ name: "printer", kind: "printer", values: "printer name", def: "default printer" }],
+	},
+	{
+		id: "presets", group: "Preset", method: "GET", path: "/presets", title: "List presets",
+		desc: "Presets, default preset and default printer on this computer (read-only).",
+		params: [],
+	},
+	{
+		id: "presets-export", group: "Preset", method: "GET", path: "/presets/export", title: "Export presets",
+		desc: "All presets as a file that can be imported from the ix.print window on another computer.",
+		params: [],
+	},
+	{
+		id: "templates", group: "Preset", method: "GET", path: "/templates", title: "Designed presets",
+		desc: "Presets with a design, including the <code>fields</code> that must be sent and sample data. <span class=\"note\">The older <code>POST /print-template</code> endpoint with <code>{\"template\": …}</code> is still accepted and means the preset with that name.</span>",
+		params: [],
+		example: '[{"name":"label-produk","preset":"label-produk","width_mm":60,"height_mm":40,"fields":["nama","kode"],"sample":{"nama":"Product A","kode":"SKU-001"}}]',
+	},
+	{
+		id: "print", group: "Print", method: "POST", path: "/print", title: "Print PDF",
+		desc: "Upload a PDF (<code>multipart/form-data</code>, first file field) with settings in the query string. The response contains <code>job_id</code> and the initial <code>status</code> (queue position). For designed presets, send JSON data — see <a href=\"#print-data\">Print data</a>.",
+		file: true,
+		params: [...CALLBACK_PARAMS, ...PRINT_PARAMS],
+		follow: true,
+		example: '{"message":"File uploaded and sent to printer","job_id":"…","printer":"EPSON_TM_T82","preset":"struk","sheets":1,"spooler_job":"EPSON_TM_T82-12","status":{"state":"queued","position":1,"ahead":0}}',
+	},
+	{
+		id: "test-page", group: "Print", method: "POST", path: "/test-page", title: "Print paper edge test",
+		desc: "A calibration page matching the job paper: a frame at the paper edge and millimetre rulers on each side. No upload; parameters are the same as <code>/print</code>.",
+		params: [{ name: "count", kind: "number", min: 1, max: 50, values: "1–50", def: "1", desc: "Number of test pages (numbered)." }, ...CALLBACK_PARAMS, ...PRINT_PARAMS],
+		follow: true,
+	},
+	{
+		id: "print-data", group: "Print", method: "POST", path: "/print", title: "Print data (designed preset)",
+		desc: "For a preset with a <b>design</b> (a label/receipt with fields such as <code>{{nama}}</code>): send only the data as a <b>JSON body</b> (<code>Content-Type: application/json</code>). ix.print fills the design, creates a PDF matching its size, then prints it using the preset settings. <code>data</code> is an <b>array of objects</b>: in <b>Label</b> mode one object = one page; in <b>List</b> mode one object = one row below the header, continuing on the next page with the header repeated and the footer at the end (or on every page). Fields not sent are printed empty.",
+		params: [],
+		json: true,
+		follow: true,
+		bodyDocs: [
+			["preset", "required*", "Name of the designed preset. *May be omitted when the default preset has a design."],
+			["data", "required", "Object array <code>[{\"field\": \"value\"}, …]</code>, max. 500. Values may be text, numbers or booleans. Image fields (e.g. <code>photo</code>) use a PNG, JPEG, GIF, BMP, WebP, TIFF or ICO data URL/base64 value."],
+			["header", "optional", "Values shared by every page: fill the Header/Footer bands in List mode (e.g. unit, date, total), or shared text in Label mode."],
+			["settings", "optional", 'Object containing <a href="#settings">print parameters</a>, e.g. <code>{"printer":"…","copies":2,"offset_x":1}</code>. Paper size always follows the design.'],
+			["callback_url", "optional", 'URL that receives the print result (JSON POST) after the job finishes. Requires a token. See <a href="#callback">Callback</a>.'],
+			["callback_ref", "optional", "Your ID (max. 200 characters), returned in the callback as <code>reference</code>."],
+			["(automatic fields)", "optional", "<code>{{no}}</code>, <code>{{halaman}}</code>, <code>{{total_halaman}}</code>, <code>{{jumlah_data}}</code> are filled by ix.print; send values in <code>data</code>/<code>header</code> to override them."],
+		],
+		example: '{"message":"Data sent to printer","job_id":"…","printer":"Zebra","preset":"label-produk","sheets":2,"spooler_job":"Zebra-651","status":{"state":"queued","position":1,"ahead":0}}',
+	},
+	{
+		id: "job-status", group: "Print", method: "GET", path: "/job-status", title: "Job status",
+		desc: "Queue position, errors or completion for a job sent through ix.print.",
+		params: [{ name: "job_id", kind: "text", values: "job_id dari /print", def: "—", required: true }],
+	},
+];
+
+const state = { printers: [], presets: {}, templates: [] };
+
+const tokenInput = document.getElementById("token");
+try { tokenInput.value = localStorage.getItem("ixprint.docsToken") || ""; } catch { /* storage blocked */ }
+const token = () => tokenInput.value.trim();
+const authHeaders = () => (token() ? { Authorization: `Bearer ${token()}` } : {});
+const api = (url, init = {}) => fetch(url, { ...init, headers: { ...(init.headers || {}), ...authHeaders() } });
+
+function el(tag, attrs = {}, ...children) {
+	const node = document.createElement(tag);
+	for (const [k, v] of Object.entries(attrs)) {
+		if (k === "class") node.className = v;
+		else if (k === "html") node.innerHTML = v;
+		else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+		else if (v !== undefined && v !== null && v !== false) node.setAttribute(k, v === true ? "" : v);
+	}
+	for (const c of children) if (c != null) node.append(c);
+	return node;
+}
+
+function renderSettingsTable() {
+	const body = document.querySelector("#settings-table tbody");
+	for (const p of PRINT_PARAMS) {
+		body.append(el("tr", {},
+			el("td", {}, el("code", {}, p.name)),
+			el("td", {}, p.values || ""),
+			el("td", {}, p.def || ""),
+			el("td", {}, p.desc || "")));
+	}
+}
+
+function inputFor(ep, p) {
+	const id = `${ep.id}-${p.name}`;
+	let input;
+	if (p.kind === "printer" || p.kind === "preset" || p.kind === "select") {
+		input = el("select", { id, "data-param": p.name, "data-kind": p.kind });
+		input.append(el("option", { value: "" }, "—"));
+		for (const o of p.options || []) input.append(el("option", { value: o }, o));
+	} else {
+		input = el("input", {
+			id, "data-param": p.name,
+			type: p.kind === "number" ? "number" : "text",
+			min: p.min, max: p.max, step: p.step,
+			placeholder: p.placeholder || (p.def && p.def !== "—" ? p.def : ""),
+			list: p.list ? `${id}-list` : undefined,
+			required: p.required,
+		});
+	}
+	const field = el("label", { class: "field" }, el("span", {}, p.name + (p.required ? " *" : "")), input);
+	if (p.list) field.append(el("datalist", { id: `${id}-list` }, ...p.list.map((v) => el("option", { value: v }))));
+	return field;
+}
+
+function queryOf(form) {
+	const q = new URLSearchParams();
+	for (const input of form.querySelectorAll("[data-param]")) {
+		if (input.value.trim() !== "") q.set(input.dataset.param, input.value.trim());
+	}
+	return q.toString();
+}
+
+function snippets(ep, form) {
+	const qs = queryOf(form);
+	const url = `${BASE}${ep.path}${qs ? "?" + qs : ""}`;
+	const fileName = form.querySelector("input[type=file]")?.files[0]?.name || "dokumen.pdf";
+	const needsToken = ep.path !== "/";
+	const tok = token() || "YOUR_TOKEN";
+	const h = needsToken ? ` -H "Authorization: Bearer ${tok}"` : "";
+	const hdr = needsToken ? `headers: { Authorization: "Bearer ${tok}" }` : "";
+	let curl;
+	let fetchCode;
+	const jsonBody = form.querySelector("textarea.json-body")?.value?.trim();
+	if (ep.json) {
+		let compact = jsonBody || "{}";
+		try { compact = JSON.stringify(JSON.parse(compact)); } catch { /* keep as typed */ }
+		curl = `curl${h} -H "Content-Type: application/json" -d '${compact.replace(/'/g, "'\\''")}' "${url}"`;
+		let pretty = jsonBody || "{}";
+		try { pretty = JSON.stringify(JSON.parse(pretty), null, 2); } catch { /* keep as typed */ }
+		fetchCode = `const res = await fetch("${url}", {\n  method: "POST",\n  headers: { "Content-Type": "application/json"${needsToken ? `, Authorization: "Bearer ${tok}"` : ""} },\n  body: JSON.stringify(${pretty.replace(/\n/g, "\n  ")}),\n});\nconst data = await res.json();\nif (!res.ok) throw new Error(data.message);\nconsole.log(data.job_id, data.status);`;
+	} else if (ep.file) {
+		curl = `curl${h} -F "file=@${fileName}" "${url}"`;
+		fetchCode = `const body = new FormData();\nbody.append("file", fileInput.files[0]); // <input type="file">\n\nconst res = await fetch("${url}", {\n  method: "POST",\n  ${hdr},\n  body,\n});\nconst data = await res.json();\nif (!res.ok) throw new Error(data.message);\nconsole.log(data.job_id, data.status);`;
+	} else if (ep.method === "POST") {
+		curl = `curl -X POST${h} "${url}"`;
+		fetchCode = `const res = await fetch("${url}", { method: "POST", ${hdr} });\nconst data = await res.json();\nif (!res.ok) throw new Error(data.message);\nconsole.log(data);`;
+	} else {
+		curl = `curl${h} "${url}"`;
+		fetchCode = `const res = await fetch("${url}"${hdr ? `, { ${hdr} }` : ""});\nconst data = await ${ep.path === "/" ? "res.text()" : "res.json()"};\nconsole.log(data);`;
+	}
+	if (ep.follow) {
+		fetchCode += `\n\n// Pantau sampai selesai\nasync function waitForJob(jobId) {\n  for (;;) {\n    const s = await (await fetch(\`${BASE}/job-status?job_id=\${jobId}\`, { ${hdr} })).json();\n    console.log(s.state, s.position, s.message);\n    if (["completed", "gone", "failed"].includes(s.state)) return s;\n    await new Promise((r) => setTimeout(r, 2000));\n  }\n}`;
+	}
+	return { curl, fetch: fetchCode };
+}
+
+const FINAL = ["completed", "gone", "failed"];
+
+function describeJob(s) {
+	switch (s.state) {
+		case "queued": return s.ahead ? `Queued #${s.position} (${s.ahead} job${s.ahead === 1 ? "" : "s"} ahead)` : "Queued, next to print";
+		case "printing": return "Printing";
+		case "paused": return "Held / paused";
+		case "error": return `Error: ${s.message || s.printer_message || "printer issue"}`;
+		case "completed": return "Printed successfully";
+		case "gone": return "No longer in the queue";
+		case "failed": return `Failed: ${s.message || ""}`;
+		default: return "Unknown status";
+	}
+}
+
+async function follow(jobId, box) {
+	const started = Date.now();
+	for (;;) {
+		let s;
+		try {
+			s = await (await api(`${BASE}/job-status?job_id=${encodeURIComponent(jobId)}`)).json();
+		} catch (e) {
+			box.textContent = `Could not read status: ${e.message}`;
+			return;
+		}
+		box.className = `job ${s.state || ""}`;
+		box.textContent = `Job status: ${describeJob(s)}`;
+		if (FINAL.includes(s.state) || Date.now() - started > 600000) return;
+		await new Promise((r) => setTimeout(r, 2000));
+	}
+}
+
+function renderEndpoint(ep) {
+	const form = el("form", { class: "try" });
+	form.append(el("h3", {}, "Try it"));
+	if (ep.file) {
+		form.append(el("label", { class: "field wide" }, el("span", {}, "file * (PDF)"), el("input", { type: "file", accept: "application/pdf,.pdf", required: true })));
+	}
+	if (ep.json) {
+		const pick = el("select", { "data-kind": "template-pick" }, el("option", { value: "" }, "— choose a designed preset to fill the example —"));
+		const body = el("textarea", { class: "json-body", rows: 10, spellcheck: "false", required: true });
+		body.value = JSON.stringify({ preset: "preset-name", data: [{ field: "value" }, { field: "value 2" }] }, null, 2);
+		pick.addEventListener("change", () => {
+			const t = state.templates.find((x) => x.name === pick.value);
+			if (!t) return;
+			const data = Object.fromEntries(t.fields.map((f) => [f, (t.sample || {})[f] ?? ""]));
+			body.value = JSON.stringify({ preset: t.name, data: [data, data] }, null, 2);
+			body.dispatchEvent(new Event("input", { bubbles: true }));
+		});
+		form.append(
+			el("div", { class: "fields" }, el("label", { class: "field wide" }, el("span", {}, "Designed preset"), pick)),
+			el("label", { class: "field wide" }, el("span", {}, "Body (JSON) *"), body));
+	}
+	const bodyTable = ep.bodyDocs
+		? el("div", { class: "table-wrap" }, el("table", {},
+			el("thead", {}, el("tr", {}, el("th", {}, "Body field"), el("th", {}, ""), el("th", {}, "Description"))),
+			el("tbody", {}, ...ep.bodyDocs.map(([k, req, d]) => el("tr", {}, el("td", {}, el("code", {}, k)), el("td", {}, req), el("td", { html: d }))))))
+		: null;
+	const main = ep.params.filter((p) => ["preset", "printer", "count", "job_id", "copies", "paper", "orientation"].includes(p.name));
+	const more = ep.params.filter((p) => !main.includes(p));
+	if (main.length) form.append(el("div", { class: "fields" }, ...main.map((p) => inputFor(ep, p))));
+	if (more.length) {
+		form.append(el("details", { class: "more" }, el("summary", {}, `Other parameters (${more.length})`), el("div", { class: "fields" }, ...more.map((p) => inputFor(ep, p)))));
+	}
+	if (!ep.params.length && !ep.file && !ep.json) form.append(el("p", { class: "note" }, "No parameters."));
+
+	const status = el("div", { class: "meta" });
+	const output = el("pre", { hidden: true });
+	const jobBox = el("div", { class: "job", hidden: true });
+	const send = el("button", { type: "submit" }, ep.method === "POST" ? "Send" : "Run");
+	const hint = ep.method === "POST" ? el("span", { class: "note" }, "This will print for real.") : null;
+	form.append(el("div", { class: "actions" }, send, hint), el("div", { class: "response" }, status, output, jobBox));
+
+	// code samples
+	const codePre = el("pre");
+	const copyBtn = el("button", { type: "button", class: "ghost copy" }, "Copy");
+	let tab = "curl";
+	const tabs = el("div", { class: "tabs" });
+	const refreshCode = () => {
+		codePre.textContent = snippets(ep, form)[tab];
+		for (const b of tabs.children) b.classList.toggle("on", b.dataset.tab === tab);
+	};
+	for (const [key, label] of [["curl", "curl"], ["fetch", "JavaScript fetch"]]) {
+		tabs.append(el("button", { type: "button", "data-tab": key, onclick: () => { tab = key; refreshCode(); } }, label));
+	}
+	copyBtn.addEventListener("click", async () => {
+		try {
+			await navigator.clipboard.writeText(codePre.textContent);
+			copyBtn.textContent = "Copied";
+		} catch {
+			copyBtn.textContent = "Failed";
+		}
+		setTimeout(() => (copyBtn.textContent = "Copy"), 1500);
+	});
+	form.addEventListener("input", refreshCode);
+	form.addEventListener("change", refreshCode);
+
+	form.addEventListener("submit", async (e) => {
+		e.preventDefault();
+		const qs = queryOf(form);
+		const url = `${BASE}${ep.path}${qs ? "?" + qs : ""}`;
+		const init = { method: ep.method };
+		if (ep.file) {
+			const body = new FormData();
+			body.append("file", form.querySelector("input[type=file]").files[0]);
+			init.body = body;
+		}
+		if (ep.json) {
+			const text = form.querySelector("textarea.json-body").value;
+			try {
+				JSON.parse(text);
+			} catch (err) {
+				status.replaceChildren(el("span", { class: "status-err" }, `Body is not valid JSON: ${err.message}`));
+				return;
+			}
+			init.headers = { "Content-Type": "application/json" };
+			init.body = text;
+		}
+		send.disabled = true;
+		jobBox.hidden = true;
+		status.textContent = "Sending…";
+		const t0 = performance.now();
+		try {
+			const res = await api(url, init);
+			const text = await res.text();
+			const ms = Math.round(performance.now() - t0);
+			status.replaceChildren(
+				el("span", { class: res.ok ? "status-ok" : "status-err" }, `${res.status} ${res.statusText}`),
+				el("span", {}, `${ms} ms`));
+			let data = null;
+			try {
+				data = JSON.parse(text);
+				output.textContent = JSON.stringify(data, null, 2);
+			} catch {
+				output.textContent = text;
+			}
+			output.hidden = false;
+			if (res.ok && ep.follow && data && data.job_id) {
+				jobBox.hidden = false;
+				follow(data.job_id, jobBox);
+				const idInput = document.getElementById("job-status-job_id");
+				if (idInput) idInput.value = data.job_id;
+			}
+		} catch (err) {
+			status.replaceChildren(el("span", { class: "status-err" }, `Failed: ${err.message}`));
+		} finally {
+			send.disabled = false;
+		}
+	});
+
+	const params = ep.params.length
+		? el("div", { class: "table-wrap" }, el("table", {},
+			el("thead", {}, el("tr", {}, el("th", {}, "Parameter"), el("th", {}, "Values"), el("th", {}, "Default"))),
+			el("tbody", {}, ...(ep.params === PRINT_PARAMS || ep.params.includes(PRINT_PARAMS[0])
+				? [...ep.params.filter((p) => !PRINT_PARAMS.includes(p)).map(paramRow), el("tr", {}, el("td", { colspan: 3, html: 'All <a href="#settings">print parameters</a>.' }))]
+				: ep.params.map(paramRow)))))
+		: null;
+
+	const card = el("div", { class: "card" },
+		el("div", { class: "endpoint-title" }, el("span", { class: `method ${ep.method}` }, ep.method), el("span", { class: "path mono" }, ep.path)),
+		el("p", { html: ep.desc }),
+		params,
+		bodyTable,
+		ep.example ? el("details", { class: "more" }, el("summary", {}, "Response example"), el("pre", {}, JSON.stringify(JSON.parse(ep.example), null, 2))) : null,
+		form,
+		el("div", { class: "tabs-wrap" }, tabs, copyBtn, codePre));
+
+	refreshCode();
+	codeRefreshers.push(refreshCode);
+	return el("section", { id: ep.id }, el("h2", {}, ep.title), card);
+}
+
+function paramRow(p) {
+	return el("tr", {}, el("td", {}, el("code", {}, p.name)), el("td", {}, p.values || ""), el("td", {}, p.def || ""));
+}
+
+function renderNav() {
+	const nav = document.getElementById("nav");
+	let group = null;
+	for (const ep of ENDPOINTS) {
+		if (ep.group !== group) {
+			group = ep.group;
+			nav.append(el("div", { class: "group" }, group));
+		}
+		nav.append(el("a", { href: `#${ep.id}` }, el("span", { class: `method ${ep.method}` }, ep.method), ep.path));
+	}
+}
+
+async function loadChoices() {
+	state.printers = [];
+	state.presets = {};
+	try {
+		const res = await api(`${BASE}/list-printer`);
+		if (res.ok) state.printers = await res.json();
+	} catch { /* server unreachable: selects stay empty */ }
+	try {
+		const res = await api(`${BASE}/presets`);
+		if (res.ok) state.presets = (await res.json()).presets || {};
+	} catch { /* ignore */ }
+	state.templates = [];
+	try {
+		const res = await api(`${BASE}/templates`);
+		if (res.ok) state.templates = await res.json();
+	} catch { /* ignore */ }
+	for (const select of document.querySelectorAll("select[data-kind=template-pick]")) {
+		while (select.options.length > 1) select.remove(1);
+		for (const t of state.templates) select.append(el("option", { value: t.name }, `${t.name} (${t.fields.join(", ") || "no fields"})`));
+	}
+	for (const select of document.querySelectorAll("select[data-kind=printer], select[data-kind=preset]")) {
+		while (select.options.length > 1) select.remove(1);
+	}
+	for (const select of document.querySelectorAll("select[data-kind=printer]")) {
+		for (const p of state.printers) {
+			select.append(el("option", { value: p.name }, p.name + (p.is_default ? " (default)" : "")));
+		}
+	}
+	for (const select of document.querySelectorAll("select[data-kind=preset]")) {
+		for (const name of Object.keys(state.presets)) select.append(el("option", { value: name }, name));
+	}
+}
+
+document.getElementById("base-url").textContent = BASE;
+if (LAN_URL && !LAN_URL.startsWith("{{") && LAN_URL !== BASE) {
+	document.getElementById("lan-note").replaceChildren("Dari komputer lain: ", el("code", {}, LAN_URL));
+}
+renderSettingsTable();
+renderNav();
+const container = document.getElementById("endpoints");
+const codeRefreshers = [];
+for (const ep of ENDPOINTS) container.append(renderEndpoint(ep));
+loadChoices();
+
+let tokenTimer;
+tokenInput.addEventListener("input", () => {
+	try { localStorage.setItem("ixprint.docsToken", token()); } catch { /* storage blocked */ }
+	codeRefreshers.forEach((f) => f());
+	clearTimeout(tokenTimer);
+	tokenTimer = setTimeout(loadChoices, 400);
+});
+document.getElementById("token-show").addEventListener("click", (e) => {
+	const show = tokenInput.type === "password";
+	tokenInput.type = show ? "text" : "password";
+	e.target.textContent = show ? "Hide" : "Show";
+});
+</script>
+</body>
+</html>
