@@ -803,6 +803,7 @@ textarea {
 }
 .segmented button {
 	flex: 1;
+	min-height: var(--control-height);
 	border: none;
 	background: var(--surface);
 	color: var(--muted);

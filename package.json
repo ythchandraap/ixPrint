@@ -11,10 +11,10 @@
     "fetch-pdfium": "bun scripts/fetch-pdfium.mjs"
   },
   "dependencies": {
-    "@tauri-apps/api": "~2.5.0",
+    "@tauri-apps/api": "~2.11.1",
     "@tauri-apps/plugin-dialog": "~2.2.1",
     "@tauri-apps/plugin-opener": "~2.2.6",
-    "@tauri-apps/plugin-os": "~2.2.1",
+    "@tauri-apps/plugin-os": "~2.3.2",
     "iconsax-reactjs": "^0.0.8",
     "lucide-vue-next": "^0.503.0",
     "prettier": "^3.5.3",
