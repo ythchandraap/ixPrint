@@ -18,11 +18,11 @@ jobs:
       matrix:
         include:
           - name: macOS Intel
-            os: macos-13
+            os: macos-15-intel
             pdfium: mac-x64
             bundles: dmg
           - name: macOS Apple Silicon
-            os: macos-14
+            os: macos-15
             pdfium: mac-arm64
             bundles: dmg
           - name: Windows x64
@@ -30,7 +30,7 @@ jobs:
             pdfium: win-x64
             bundles: nsis,msi
           - name: Linux x64
-            os: ubuntu-22.04
+            os: ubuntu-24.04
             pdfium: linux-x64
             bundles: appimage,deb
 
@@ -51,8 +51,8 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libssl-dev \
-            libwebkit2gtk-4.0-dev \
-            libsoup2.4-dev \
+            libwebkit2gtk-4.1-dev \
+            libsoup-3.0-dev \
             wget
 
       - name: Set up Bun
