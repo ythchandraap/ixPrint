@@ -8,27 +8,8 @@
   "permissions": [
     "core:default",
     "opener:default",
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [
-        {
-          "name": "exec-pwsh",
-          "cmd": "powershell.exe",
-          "args": [
-            "-Command",
-            {
-              "validator": "^.+$"
-            }
-          ]
-        }
-      ]
-    },
-    "shell:allow-spawn",
-    "shell:allow-open",
-    "fs:allow-exists",
-    "fs:allow-read",
-    "fs:allow-resource-read",
+    "dialog:default",
     "os:default",
-    "fs:default"
+    "autostart:default"
   ]
 }

@@ -1,240 +1,234 @@
-use actix_multipart::Multipart;
-use local_ip_address::local_ip;
-use std::{env, str};
-use std::process::Command;
-use actix_web::{web, App,HttpRequest, HttpResponse, HttpServer, Responder};
-use serde::Serialize;
-use futures::StreamExt;
-use actix_cors::Cors;
+mod auth;
+mod callback;
+mod canvas;
+mod commands;
+mod config;
+mod history;
+mod job;
+mod layout;
+mod printer;
+mod remote;
+mod server;
+mod settings;
+mod template;
+mod testpage;
 
-use std::{ fs, io::Write, path::{ PathBuf}, fs::File};
-use serde::Deserialize;
-use actix_web::web::Query;
+use config::ConfigStore;
+use history::History;
+use job::AppState;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tauri::{Emitter, Manager};
 
-
-#[derive(Serialize)]
-struct Printer {
-    name: String,
-    status: String,
-    shared: String,
-}
-
-#[derive(Serialize)]
-struct ResponseMessage {
-    message: String,
-}
-#[derive(Deserialize)]
-pub struct PrintQueryParams {
-    printer_name: String,
-    copies: String,
-    orientation: String,
-}
-fn fetch_printers() -> Vec<Printer> {
-    let output = Command::new("powershell")
-        .args(&[
-            "-Command",
-            "Get-Printer | Select-Object Name, PrinterStatus, Shared | ConvertTo-Csv -NoTypeInformation",
-        ])
-        .output();
-    match output {
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            stdout
-                .lines()
-                .skip(1) // Skip CSV headers
-                .filter_map(|line| {
-                    let parts: Vec<&str> = line.split(',').collect();
-                    if parts.len() == 3 {
-                        Some(Printer {
-                            name: parts[0].trim_matches('"').trim().to_string(),
-                            status: parts[1].trim_matches('"').trim().to_string(),
-                            shared: parts[2].trim_matches('"').trim().to_string(),
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        }
-        Err(_) => vec![],
-    
+#[cfg(desktop)]
+fn focus_main(app: &tauri::AppHandle, tab: Option<&str>) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    if let Some(tab) = tab {
+        let _ = app.emit("tray-navigate", tab);
     }
 }
 
-#[tauri::command]
-fn get_printers_json() -> Vec<Printer> {
-    fetch_printers()
-}
- 
+#[cfg(desktop)]
+fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
+    use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
+    use tauri::tray::TrayIconBuilder;
+    use tauri_plugin_autostart::ManagerExt;
 
-// Actix HTTP handler version
-async fn get_printers_http() -> impl Responder {
-    HttpResponse::Ok().json(fetch_printers())
-}
+    let state = app.state::<Arc<AppState>>();
+    let bridge_item = CheckMenuItem::with_id(
+        app,
+        "bridge-toggle",
+		"Application bridge",
+        true,
+        state.config.get().bridge_enabled,
+        None::<&str>,
+    )?;
+    let autostart_item = CheckMenuItem::with_id(
+        app,
+        "autostart-toggle",
+		"Run at login",
+        true,
+        app.autolaunch().is_enabled().unwrap_or(false),
+        None::<&str>,
+    )?;
+	let printers_item = MenuItem::with_id(app, "view-printers", "View printers", true, None::<&str>)?;
+	let history_item = MenuItem::with_id(app, "view-history", "View history log", true, None::<&str>)?;
+	let open_item = MenuItem::with_id(app, "open", "Open ix.print", true, None::<&str>)?;
+	let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let separator2 = PredefinedMenuItem::separator(app)?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &bridge_item,
+            &autostart_item,
+            &separator,
+            &printers_item,
+            &history_item,
+            &open_item,
+            &separator2,
+            &quit_item,
+        ],
+    )?;
 
-pub async fn handle_print(
-    _req: HttpRequest,
-    mut multipart: Multipart,
-    query: Query<PrintQueryParams>,
-) -> impl Responder {
-    
-    let printer_name = if query.printer_name.is_empty() { "Microsoft Print to PDF" } else { &query.printer_name };
-    let copies = if query.copies.is_empty() { "1" } else { &query.copies };
-    let orientation = if query.orientation.is_empty() { "landscape" } else { &query.orientation };
-    
-    println!("Printer: {}, Copies: {}, Orientation: {}", printer_name, copies, orientation);
-
-    let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let folder_path = home_dir.join("fxprint/file");
-
-    if let Err(e) = fs::create_dir_all(&folder_path) {
-        eprintln!("Failed to create folder: {}", e);
-        return HttpResponse::InternalServerError().body("Failed to create target folder");
+    let bridge_for_event = bridge_item.clone();
+    let autostart_for_event = autostart_item.clone();
+    let mut tray = TrayIconBuilder::new();
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray = tray.icon(icon);
     }
-
-    while let Some(item) = multipart.next().await {
-        match item {
-            Ok(mut field) => {
-                let filename = field
-                    .content_disposition()
-                    .and_then(|cd| cd.get_filename())
-                    .unwrap_or("unnamed");
-
-                let file_path = folder_path.join(sanitize_filename::sanitize(&filename));
-                let mut f = match File::create(&file_path) {
-                    Ok(file) => file,
-                    Err(e) => {
-                        eprintln!("File create error: {}", e);
-                        return HttpResponse::InternalServerError().body("File create failed");
+    tray.menu(&menu)
+        .show_menu_on_left_click(true)
+        .on_menu_event(move |app, event| match event.id.as_ref() {
+            "bridge-toggle" => {
+                let state = app.state::<Arc<AppState>>().inner().clone();
+                let enabled = !state.config.get().bridge_enabled;
+                let bridge_item = bridge_for_event.clone();
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let result = crate::commands::set_bridge_enabled_inner(state, enabled).await;
+                    let _ = bridge_item.set_checked(if result.is_ok() { enabled } else { !enabled });
+                    if result.is_ok() {
+                        let _ = app.emit("bridge-changed", enabled);
                     }
-                };
-
-                while let Some(chunk) = field.next().await {
-                    let data = match chunk {
-                        Ok(c) => c,
-                        Err(e) => {
-                            eprintln!("Chunk read error: {}", e);
-                            return HttpResponse::InternalServerError().body("Failed to read chunk");
-                        }
-                    };
-                    if let Err(e) = f.write_all(&data) {
-                        eprintln!("Write error: {}", e);
-                        return HttpResponse::InternalServerError().body("Failed to write file");
-                    }
-                }
-                // File saved, now run the print command
-
-                if os_detected() == "windows" {
-                    let exe_path = PathBuf::from("src/assets/spdf.exe"); // Adjust if needed
-    
-                    let command_str = format!(
-                        "Start-Process -FilePath '{}' -ArgumentList '-print-to \"{}\" -print-settings \"{}x,{}\" \"{}\"' -Wait -WindowStyle Hidden",
-                        exe_path.display(),
-                        printer_name,
-                        copies,
-                        orientation,
-                        file_path.display()
-                    );
-    
-                    println!("Running command: {}", command_str);
-    
-                    let output = Command::new("powershell")
-                        .args(["-c", &command_str])
-                        .output();
-    
-                    match output {
-                        Ok(out) if out.status.success() => {
-                            println!("Print successful: {}", String::from_utf8_lossy(&out.stdout));
-                            return HttpResponse::Ok().json(ResponseMessage {
-                                message: "File uploaded and sent to printer".to_string(),
-                            });
-                        }
-                        Ok(out) => {
-                            eprintln!("Print failed: {}", String::from_utf8_lossy(&out.stderr));
-                            return HttpResponse::InternalServerError()
-                                .body(format!("Print failed: {}", String::from_utf8_lossy(&out.stderr)));
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to run print command: {}", e);
-                            return HttpResponse::InternalServerError().body("Failed to execute print command");
-                        }
-                    }
-                } else{
-                    return HttpResponse::Ok().json(ResponseMessage {
-                        message: " This is not supported. Only Windows is supported.".to_string(),
-                    });
-                }
+                });
             }
-            Err(e) => {
-                eprintln!("Multipart error: {}", e);
-                return HttpResponse::BadRequest().body("Malformed multipart data");
+            "autostart-toggle" => {
+                let manager = app.autolaunch();
+                let enabled = manager.is_enabled().unwrap_or(false);
+                let result = if enabled { manager.disable() } else { manager.enable() };
+                let _ = autostart_for_event.set_checked(if result.is_ok() { !enabled } else { enabled });
             }
-        }
-    }
-
-    HttpResponse::BadRequest().body("No file uploaded")
+            "view-printers" => focus_main(app, Some("printers")),
+            "view-history" => focus_main(app, Some("history")),
+            "open" => focus_main(app, None),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .build(app)?;
+    Ok(())
 }
 
-
-
-async fn hello() -> impl Responder {
-    "Hello, world!"
+/// Directories that may hold the bundled PDFium library, most specific first.
+fn pdfium_dirs(app: &tauri::App) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(res) = app.path().resource_dir() {
+        dirs.push(res.join("pdfium").join("lib"));
+    }
+    if let Some(exe_dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(PathBuf::from)) {
+        dirs.push(exe_dir);
+    }
+    if cfg!(debug_assertions) {
+        dirs.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("pdfium").join("lib"));
+    }
+    dirs
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .setup(|_app| {
-            tauri::async_runtime::spawn(async {
-                HttpServer::new(|| {
-                    App::new()
-                        .wrap(
-                            Cors::default()
-                                .allow_any_origin()
-                                .allow_any_method()
-                                .allow_any_header()
-                        )
-                        .route("/", web::get().to(hello))
-                        .route("/list-printer", web::get().to(get_printers_http))
-                        .route("/print", web::post().to(handle_print))
-                })
-                .bind("0.0.0.0:18032")
-                .expect("Failed to bind to port 18032")
-                .run()
-                .await
-                .expect("Failed to run Actix server");
+    let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_autostart::init(
+        tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+        None,
+    ));
+
+    builder
+        .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            if let Err(e) = layout::init(&pdfium_dirs(app)) {
+                eprintln!("{}", e);
+            }
+
+            let data_dir = app.path().app_data_dir()?;
+            // Config (token hashes, presets), history and print jobs: owner only.
+            std::fs::create_dir_all(&data_dir)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&data_dir, std::fs::Permissions::from_mode(0o700))?;
+            }
+            let jobs_dir = data_dir.join("jobs");
+            // Leftovers from a crash may contain documents; don't keep them around.
+            let _ = std::fs::remove_dir_all(&jobs_dir);
+            std::fs::create_dir_all(&jobs_dir)?;
+
+            let config = ConfigStore::load(&data_dir);
+            let remotes = remote::RemoteStore::load(&data_dir);
+            let history = History::new(data_dir.join("history"));
+            history.prune(config.get().history_retention_days);
+
+            let state = Arc::new(AppState {
+                config,
+                remotes,
+                remote_cache: Default::default(),
+                server_error: Default::default(),
+                server_handle: Default::default(),
+                token_usage: Default::default(),
+                failed_auth: Default::default(),
+                history,
+                jobs_dir,
             });
+            app.manage(state.clone());
+
+            if state.config.get().bridge_enabled {
+                server::spawn(state.clone());
+            }
+            #[cfg(desktop)]
+            setup_tray(app)?;
             Ok(())
         })
-        .plugin(tauri_plugin_os::init())
-        .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
-            greet,
-            this_local_ip,
-            os_detected,
-            get_printers_json
+            commands::this_local_ip,
+            commands::open_docs,
+            commands::os_detected,
+            commands::engine_status,
+            commands::server_status,
+            commands::bridge_enabled,
+            commands::set_bridge_enabled,
+            commands::set_server_port,
+            commands::remote_list,
+            commands::remote_add,
+            commands::remote_update,
+            commands::remote_remove,
+            commands::remote_test,
+            commands::get_printers,
+            commands::get_capabilities,
+            commands::printer_devices,
+            commands::printer_drivers,
+            commands::printer_details,
+            commands::printer_add,
+            commands::printer_update,
+            commands::printer_remove,
+            commands::printer_set_os_default,
+            commands::get_queue,
+            commands::job_status,
+            commands::get_config,
+            commands::set_default_printer,
+            commands::set_default_preset,
+            commands::save_preset,
+            commands::delete_preset,
+            commands::preview_template,
+            commands::preview_print,
+            commands::set_history_retention,
+            commands::create_token,
+            commands::revoke_token,
+            commands::set_require_token,
+            commands::set_allowed_origins,
+            commands::token_usage,
+            commands::export_presets,
+            commands::preview_import,
+            commands::apply_import,
+            commands::history_days,
+            commands::history_page,
+            commands::test_print,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
-#[tauri::command]
-fn this_local_ip() -> String {
-    match local_ip() {
-        Ok(ip) => ip.to_string(),
-        Err(_) => "Error getting local IP".to_string(),
-    }
-}
-
-#[tauri::command]
-fn os_detected() -> String {
-    let os = tauri_plugin_os::platform();
-    os.to_string()
 }
