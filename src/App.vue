@@ -9,12 +9,14 @@ import PresetsTab from "./components/PresetsTab.vue";
 import HistoryTab from "./components/HistoryTab.vue";
 import SettingsView from "./components/SettingsView.vue";
 import EmptyState from "./components/EmptyState.vue";
+import OnboardingDialog from "./components/OnboardingDialog.vue";
 
 /** Product name, in one place so a rename touches a single line. */
 const PRODUCT = "ix.print";
 /** Parent brand; the product remains the primary task identifier. */
 const BRAND = "itz.ixxyyzz";
 const DEFAULT_PORT = 18032;
+const ONBOARDING_KEY = "ixprint.onboarding.v1";
 
 const inApp = isInApp();
 const version = ref("");
@@ -35,6 +37,7 @@ const selectedPrinter = ref("");
 const tab = ref<"printers" | "presets" | "history">("printers");
 /** Settings (API tokens, API docs) replace the tabs while open. */
 const settingsOpen = ref(false);
+const onboardingOpen = ref(false);
 const printing = ref(false);
 const toast = ref<{ text: string; error: boolean } | null>(null);
 const timers: number[] = [];
@@ -46,6 +49,23 @@ function notify(text: string, error = false) {
 	toast.value = { text, error };
 	clearTimeout(toastTimer);
 	toastTimer = window.setTimeout(() => (toast.value = null), error ? 6000 : 3000);
+}
+
+function needsOnboarding() {
+	try {
+		return localStorage.getItem(ONBOARDING_KEY) !== "accepted";
+	} catch {
+		return true;
+	}
+}
+
+function completeOnboarding() {
+	try {
+		localStorage.setItem(ONBOARDING_KEY, "accepted");
+	} catch {
+		// Keep the acknowledgement for this session when storage is unavailable.
+	}
+	onboardingOpen.value = false;
 }
 
 const refreshing = ref(false);
@@ -286,6 +306,7 @@ function setConfig(next: Config) {
 
 onMounted(async () => {
 	if (!inApp) return; // opened in a normal browser: nothing to talk to
+	onboardingOpen.value = needsOnboarding();
 	unlistenTray = await listen<string>("tray-navigate", (event) => {
 		settingsOpen.value = false;
 		tab.value = event.payload === "history" ? "history" : "printers";
@@ -519,6 +540,8 @@ onBeforeUnmount(() => {
 			<span>IX Systems / {{ BRAND }}</span>
 		</footer>
 
+		<OnboardingDialog v-if="onboardingOpen" @complete="completeOnboarding" />
+
 		<div v-if="toast" :class="['toast', { error: toast.error }]" role="status" @click="toast = null">{{ toast.text }}</div>
 	</div>
 </template>
@@ -566,6 +589,7 @@ onBeforeUnmount(() => {
 	--brand-pale: #e6eafe; /* selected / hover backgrounds */
 	--brand-ink: var(--cobalt-deep);
 	--brand-soft: #e6eafe;
+	--control-height: 36px;
 	--ok: #1f7a4d;
 	--ok-soft: #e3f1e9;
 	--warn: #9a5b00;
@@ -1138,6 +1162,7 @@ textarea {
 	border: 1px solid var(--line);
 	border-radius: var(--r-md);
 	padding: 6px 8px;
+	min-height: var(--control-height);
 	min-width: 0;
 	width: 100%;
 	transition: border-color 150ms var(--ease);
@@ -1157,7 +1182,7 @@ button.ghost {
 	font-weight: 500;
 	border-radius: var(--r-md);
 	padding: 6px 14px;
-	min-height: 32px;
+	min-height: var(--control-height);
 	cursor: pointer;
 	display: inline-flex;
 	align-items: center;
@@ -1182,8 +1207,8 @@ button.ghost:hover:not(:disabled) {
 	border-color: var(--muted);
 }
 button.small {
-	padding: 4px 10px;
-	min-height: 28px;
+	padding: 6px 10px;
+	min-height: var(--control-height);
 	font-size: 13px;
 }
 button.icon {
