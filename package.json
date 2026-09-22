@@ -1,5 +1,5 @@
 {
-  "name": "fxprint",
+  "name": "ixprint",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -7,14 +7,14 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "fetch-pdfium": "bun scripts/fetch-pdfium.mjs"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-fs": "~2",
-    "@tauri-apps/plugin-opener": "^2",
-    "@tauri-apps/plugin-os": "~2",
-    "@tauri-apps/plugin-shell": "~2",
+    "@tauri-apps/api": "~2.5.0",
+    "@tauri-apps/plugin-dialog": "~2.2.1",
+    "@tauri-apps/plugin-opener": "~2.2.6",
+    "@tauri-apps/plugin-os": "~2.2.1",
     "iconsax-reactjs": "^0.0.8",
     "lucide-vue-next": "^0.503.0",
     "prettier": "^3.5.3",

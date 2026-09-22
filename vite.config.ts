@@ -5,8 +5,19 @@ import vue from "@vitejs/plugin-vue";
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vitejs.dev/config/
-export default defineConfig(async () => ({
+export default defineConfig(async ({ command }) => ({
   plugins: [vue()],
+
+  // Production bundle: minified, no source maps, no console/debugger calls or
+  // license comments — nothing that helps map the shipped code back to source.
+  build: {
+    sourcemap: false,
+    minify: "esbuild",
+  },
+  esbuild:
+    command === "build"
+      ? { drop: ["console", "debugger"], legalComments: "none" }
+      : undefined,
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
