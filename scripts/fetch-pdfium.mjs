@@ -3,7 +3,7 @@
 //        bun run fetch-pdfium mac-arm64  (only the listed targets)
 //
 // The version must match the `pdfium_*` feature of the pdfium-render crate (see src-tauri/Cargo.toml).
-import { mkdirSync, existsSync, rmSync, writeFileSync, renameSync, readdirSync } from "node:fs";
+import { mkdirSync, existsSync, rmSync, writeFileSync, copyFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -57,8 +57,11 @@ for (const target of targets) {
   }
 
   mkdirSync(outDir, { recursive: true });
-  renameSync(join(work, libPath), join(outDir, libName));
-  if (existsSync(join(work, "LICENSE"))) renameSync(join(work, "LICENSE"), join(outDir, "LICENSE"));
+  // The temporary directory and workspace can be on different volumes on
+  // Windows GitHub runners (for example C:\Temp and D:\a). Rename then
+  // fails with EXDEV, so copy the extracted files before removing the temp.
+  copyFileSync(join(work, libPath), join(outDir, libName));
+  if (existsSync(join(work, "LICENSE"))) copyFileSync(join(work, "LICENSE"), join(outDir, "LICENSE"));
   rmSync(work, { recursive: true, force: true });
   console.log(`✓ ${target} → ${join(outDir, libName)}`);
 }
