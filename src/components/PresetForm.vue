@@ -369,7 +369,7 @@ async function save() {
 			<template v-if="!design">
 			<label class="field">
 					<span>Paper size</span>
-					<AutocompleteField v-model="form.paperMode" :options="paperModeOptions" aria-label="Paper size" />
+					<AutocompleteField v-model="form.paperMode" :options="paperModeOptions" :limit="12" aria-label="Paper size" />
 			</label>
 			<template v-if="form.paperMode === 'custom'">
 				<div class="grid2">
