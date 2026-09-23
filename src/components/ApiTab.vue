@@ -110,14 +110,13 @@ const when = (iso: string) => new Date(iso).toLocaleString("en-GB", { dateStyle:
 				<strong class="grow">Require a token to access the API</strong>
 			</label>
 			<p v-if="config.require_token && !config.tokens.length" class="warn-text small-text">
-				No tokens yet: all API requests are rejected. Create a token for each application that prints.
+				No tokens yet — all requests are rejected until one exists.
 			</p>
 			<p v-else-if="config.require_token" class="hint">
-				Only applications with a valid token can print or read printers and queues through port {{ config.server_port }}.
+				Only apps with a valid token can use port {{ config.server_port }}.
 			</p>
 			<p v-else class="warn-text small-text">
-				⚠ Not required: anyone on the network who knows {{ localIp }}:{{ config.server_port }} can print.
-				Enable this again after a token is configured in every web app.
+				⚠ Anyone on the network at {{ localIp }}:{{ config.server_port }} can print until this is enabled.
 			</p>
 		</div>
 
@@ -142,7 +141,7 @@ const when = (iso: string) => new Date(iso).toLocaleString("en-GB", { dateStyle:
 			v-if="!config.tokens.length"
 			:icon="KeyRound"
 			title="No tokens yet"
-			text="Create one token for each application that prints (such as a business app, till or label system), then enable “Require a token”."
+			text="Create a token for each application that prints, then enable “Require a token”."
 		/>
 		<div v-for="t in config.tokens" :key="t.id" class="card row">
 			<div class="grow min0">
@@ -161,16 +160,12 @@ const when = (iso: string) => new Date(iso).toLocaleString("en-GB", { dateStyle:
 
 		<fieldset class="stack tight">
 			<legend>Allowed websites</legend>
-			<p class="small-text">
-				Web apps calling the API <b>from a browser</b> can only do so when their address is listed here. Server applications,
-				curl and other programs are not affected.
-			</p>
+			<p class="small-text">Only affects browser calls — server apps and curl aren't affected.</p>
 			<p v-if="anyOrigin()" class="warn-text small-text">
-				⚠ <code>*</code> = every website is allowed, including unrelated sites opened on a computer on the same network.
-				Replace it with your web app address, then remove <code>*</code>.
+				⚠ <code>*</code> allows every website. Replace it with your web app's address, then remove <code>*</code>.
 			</p>
 			<p v-else-if="!config.allowed_origins.length" class="hint">
-				None yet: no website can call the API from a browser.
+				No website can call the API from a browser yet.
 			</p>
 			<div v-for="o in config.allowed_origins" :key="o" class="card row">
 				<Globe :size="16" />
@@ -181,7 +176,7 @@ const when = (iso: string) => new Date(iso).toLocaleString("en-GB", { dateStyle:
 					<input v-model="newOrigin" class="grow" required placeholder="https://app.example.com" />
 				<button class="primary small" type="submit"><Plus :size="14" /> Allow</button>
 			</form>
-			<p class="hint">Enter the scheme, host and port only (no path), exactly as shown in the web app's address bar.</p>
+			<p class="hint">Scheme, host and port only — no path.</p>
 		</fieldset>
 
 		<fieldset>
@@ -190,7 +185,7 @@ const when = (iso: string) => new Date(iso).toLocaleString("en-GB", { dateStyle:
 			<pre class="settings">Authorization: Bearer fxp_…
 X-Api-Token: fxp_…
 ?token=fxp_…</pre>
-			<p class="hint">Avoid <code>?token=</code> where possible: it is recorded in logs and browser history.</p>
+			<p class="hint">Avoid <code>?token=</code>: it's recorded in logs and browser history.</p>
 		</fieldset>
 	</section>
 </template>

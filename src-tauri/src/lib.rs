@@ -174,6 +174,7 @@ pub fn run() {
 
             let state = Arc::new(AppState {
                 config,
+                desktop_key: uuid::Uuid::new_v4().to_string(),
                 remotes,
                 remote_cache: Default::default(),
                 server_error: Default::default(),
@@ -196,6 +197,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::this_local_ip,
             commands::open_docs,
+            commands::data_folder_path,
+            commands::open_data_folder,
             commands::os_detected,
             commands::engine_status,
             commands::server_status,
@@ -218,6 +221,8 @@ pub fn run() {
             commands::printer_set_os_default,
             commands::get_queue,
             commands::job_status,
+            commands::app_print,
+            commands::preview_pdf_sheet,
             commands::get_config,
             commands::set_default_printer,
             commands::set_default_preset,

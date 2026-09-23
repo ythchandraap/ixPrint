@@ -5,7 +5,7 @@
 
 use crate::canvas::{wrap, Canvas};
 use crate::layout::pdfium;
-use crate::settings::{mm_to_pt, pt_to_mm};
+use crate::settings::{mm_to_pt, pt_to_mm, MAX_PAPER_MM};
 use pdfium_render::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -17,7 +17,9 @@ pub type Record = BTreeMap<String, String>;
 pub const MAX_RECORDS: usize = 500;
 const MAX_ELEMENTS: usize = 500;
 const MIN_SIZE_MM: f32 = 5.0;
-const MAX_SIZE_MM: f32 = 2000.0;
+/// Same bound as `PrintSettings::validate`'s custom/roll paper check, so a
+/// design's page size and a plain print job reject the same absurd sizes.
+const MAX_SIZE_MM: f32 = MAX_PAPER_MM;
 
 fn default_font_size() -> f32 {
     10.0
@@ -775,7 +777,7 @@ pub fn preview_png(template: &Template, record: &Record, px_per_mm: f32) -> Resu
     render_page_png(&doc, 0, px_per_mm)
 }
 
-fn render_page_png(doc: &PdfDocument, index: usize, px_per_mm: f32) -> Result<Vec<u8>, String> {
+pub(crate) fn render_page_png(doc: &PdfDocument, index: usize, px_per_mm: f32) -> Result<Vec<u8>, String> {
     let page = doc.pages().get(index as PdfPageIndex).map_err(|e| e.to_string())?;
     let w = (crate::settings::pt_to_mm(page.width().value) * px_per_mm).round().clamp(1.0, 4000.0) as i32;
     let h = (crate::settings::pt_to_mm(page.height().value) * px_per_mm).round().clamp(1.0, 4000.0) as i32;

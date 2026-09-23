@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
-import { BookOpen, ExternalLink, Network, Server, ShieldCheck } from "lucide-vue-next";
+import { onMounted, ref, watch } from "vue";
+import { BookOpen, ExternalLink, FolderOpen, Network, Server, ShieldCheck } from "lucide-vue-next";
 import { api, errorText, type Config } from "../api";
 import ApiTab from "./ApiTab.vue";
 import ErrorLogPanel from "./ErrorLogPanel.vue";
@@ -40,14 +40,27 @@ async function savePort() {
 		savingPort.value = false;
 	}
 }
+
+const dataFolderPath = ref("");
+onMounted(async () => {
+	try {
+		dataFolderPath.value = await api.dataFolderPath();
+	} catch {
+		// Shown as empty; the Open/Copy buttons below still work.
+	}
+});
+
+async function openDataFolder() {
+	try {
+		await api.openDataFolder();
+	} catch (e) {
+		emit("notify", errorText(e), true);
+	}
+}
 </script>
 
 <template>
 	<section class="settings-page stack">
-		<div class="settings-intro card stack tight">
-			<strong>Connection, access and data controls</strong>
-			<p class="hint">These settings decide how web apps reach ix.print, how requests are protected, and which other computers may use its printers.</p>
-		</div>
 		<ErrorLogPanel :show-system-logs="props.os === 'windows'" @copy="emit('copy', $event)" @notify="(m, e) => emit('notify', m, e)" />
 
 		<section class="settings-group">
@@ -76,7 +89,7 @@ async function savePort() {
 					<button class="primary small" type="button" :disabled="savingPort" @click="savePort">{{ savingPort ? "Saving…" : "Save port" }}</button>
 				</div>
 			</label>
-			<p class="hint">Use a whole number from 1024 to 65535. The bridge restarts after a change.</p>
+			<p class="hint">Restarts the bridge after a change.</p>
 			</fieldset>
 		</section>
 
@@ -93,12 +106,10 @@ async function savePort() {
 						<li>It checks the API token when Require a token is enabled.</li>
 						<li>Only then can the request list printers, inspect queues or submit a print job.</li>
 					</ol>
+					<p>Allowed websites only limits browser (JavaScript fetch) calls — server-side apps, curl and other non-browser clients are not restricted by it.</p>
 					<p class="info-note">Tokens are stored as hashes. The full token is shown only once when created.</p>
 				</SettingInfo>
 			</div>
-			<p class="hint">
-				Use the API controls below to require tokens, manage application tokens and allow browser origins.
-			</p>
 			<ApiTab
 				:config="config"
 				:local-ip="localIp"
@@ -143,11 +154,36 @@ async function savePort() {
 				</SettingInfo>
 			</div>
 			<div class="card stack tight">
-				<p class="hint">Endpoint guide and forms for trying the API directly. From another computer, open <code>http://{{ localIp }}:{{ config.server_port }}/docs</code>.</p>
+				<p class="hint">From another computer: <code>http://{{ localIp }}:{{ config.server_port }}/docs</code></p>
 				<div class="row wrap">
 					<button class="ghost small" @click="emit('docs', false)"><BookOpen :size="14" /> Open documentation</button>
 					<button class="ghost small" @click="emit('docs', true)"><ExternalLink :size="14" /> Open in browser</button>
 					<button class="ghost small" @click="emit('copy', `http://${localIp}:${config.server_port}/docs`)">Copy address</button>
+				</div>
+			</div>
+		</section>
+
+		<section class="settings-group">
+			<div class="settings-group-heading">
+				<div class="settings-group-title">
+					<FolderOpen :size="18" />
+					<div><h2>Local data</h2><p>Where ix.print stores its settings, history and temporary files.</p></div>
+				</div>
+				<SettingInfo title="Local data">
+					<p>ix.print keeps everything it needs on this computer only — nothing is sent elsewhere.</p>
+					<ol>
+						<li><code>config.json</code> holds the default printer, presets and token hashes (a backup is kept as <code>config.json.bak</code>).</li>
+						<li><code>history/</code> holds one file per day of print jobs, pruned after the retention period.</li>
+						<li><code>jobs/</code> holds temporary files while a job is printing; they are deleted right after.</li>
+					</ol>
+					<p class="info-note">Open the folder below to inspect or back up these files directly.</p>
+				</SettingInfo>
+			</div>
+			<div class="card stack tight">
+				<p class="hint"><code>{{ dataFolderPath || "…" }}</code></p>
+				<div class="row wrap">
+					<button class="ghost small" @click="openDataFolder"><FolderOpen :size="14" /> Open folder</button>
+					<button class="ghost small" :disabled="!dataFolderPath" @click="emit('copy', dataFolderPath)">Copy path</button>
 				</div>
 			</div>
 		</section>
@@ -157,10 +193,6 @@ async function savePort() {
 <style scoped>
 .settings-page {
 	gap: 20px;
-}
-
-.settings-intro {
-	border-left: 3px solid var(--accent);
 }
 
 .settings-group {

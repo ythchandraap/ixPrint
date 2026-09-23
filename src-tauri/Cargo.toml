@@ -35,7 +35,7 @@ dirs = "6.0.0"
 actix-cors = "0.7.1"
 sha2 = "0.10"
 # Print-result callbacks: HTTP(S) POST, HMAC-signed.
-ureq = "3"
+ureq = { version = "3", features = ["multipart"] }
 hmac = "0.12"
 # Templates: barcodes, QR codes and PNG previews.
 qrcode = { version = "0.14", default-features = false }
