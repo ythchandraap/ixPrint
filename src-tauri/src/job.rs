@@ -11,6 +11,9 @@ use std::time::Instant;
 
 pub struct AppState {
     pub config: ConfigStore,
+    /// Random in-process credential used only by the desktop window's local
+    /// HTTP client. It is never persisted or exposed to the frontend.
+    pub desktop_key: String,
     pub remotes: crate::remote::RemoteStore,
     /// Last /list-printer answer per remote id.
     pub remote_cache: crate::remote::RemoteCache,
@@ -76,7 +79,7 @@ pub struct JobRequest {
     pub hop: bool,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, serde::Deserialize, Debug)]
 pub struct JobResult {
     pub job_id: String,
     pub printer: String,

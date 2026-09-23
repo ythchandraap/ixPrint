@@ -42,6 +42,46 @@ const PAPER_NAME_LEN: usize = 64;
 const BIN_NAME_LEN: usize = 24;
 
 // ---------------------------------------------------------------------------
+// Dedicated spooler thread
+
+/// Printer drivers load their DLLs into this process (DocumentPropertiesW,
+/// CreateDCW, StartDoc, ...) and some misbehave in DLL_THREAD_DETACH. Pool
+/// threads exit after a few idle seconds, which would crash the app shortly
+/// after a job. All driver-touching calls therefore run on one thread that
+/// lives as long as the process.
+type Task = Box<dyn FnOnce() + Send + 'static>;
+
+fn spooler_thread() -> &'static std::sync::Mutex<std::sync::mpsc::Sender<Task>> {
+    static TX: std::sync::OnceLock<std::sync::Mutex<std::sync::mpsc::Sender<Task>>> = std::sync::OnceLock::new();
+    TX.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<Task>();
+        std::thread::Builder::new()
+            .name("ixprint-spooler".into())
+            .spawn(move || {
+                for task in rx {
+                    // A panic must not end this thread.
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(task));
+                }
+            })
+            .expect("spooler thread");
+        std::sync::Mutex::new(tx)
+    })
+}
+
+fn on_spooler_thread<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    let task: Task = Box::new(move || {
+        let _ = tx.send(f());
+    });
+    spooler_thread()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .send(task)
+        .map_err(|_| "The printer thread stopped".to_string())?;
+    rx.recv().map_err(|_| "The printer driver failed unexpectedly".to_string())
+}
+
+// ---------------------------------------------------------------------------
 // Listing
 
 pub fn list_printers() -> Vec<Printer> {
@@ -105,19 +145,34 @@ fn printer_status(bits: u32) -> (String, Option<String>) {
     (status.into(), warning)
 }
 
-/// Calls a size-then-fill winspool API into an 8-byte aligned buffer.
+/// Calls a size-then-fill winspool API into an 8-byte aligned buffer. The
+/// queue can change between the size and the fill call, so it retries when the
+/// buffer turns out too small.
 fn winspool_buffer(mut call: impl FnMut(Option<&mut [u8]>, &mut u32) -> bool) -> Option<Vec<u64>> {
-    let mut needed = 0u32;
-    call(None, &mut needed);
-    if needed == 0 {
-        return None;
+    for _ in 0..4 {
+        let mut needed = 0u32;
+        call(None, &mut needed);
+        if needed == 0 {
+            return None;
+        }
+        // Headroom for entries added since the size query.
+        let size = needed as usize + 512;
+        let mut buf = vec![0u64; size.div_ceil(8)];
+        let bytes = unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, size) };
+        let mut got = size as u32;
+        if call(Some(bytes), &mut got) {
+            return Some(buf);
+        }
     }
-    let mut buf = vec![0u64; (needed as usize).div_ceil(8)];
-    let bytes = unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, needed as usize) };
-    call(Some(bytes), &mut needed).then_some(buf)
+    None
 }
 
 pub fn queue(printer: &str) -> Result<PrinterQueue, String> {
+    let printer = printer.to_string();
+    on_spooler_thread(move || queue_impl(&printer))?
+}
+
+fn queue_impl(printer: &str) -> Result<PrinterQueue, String> {
     let name = HSTRING::from(printer);
     let handle = PrinterHandle::open(&name)?;
 
@@ -128,10 +183,11 @@ pub fn queue(printer: &str) -> Result<PrinterQueue, String> {
 
     let mut count = 0u32;
     let jobs_buf = winspool_buffer(|buf, needed| {
+        count = 0;
         unsafe { EnumJobsW(handle.0, 0, u32::MAX, 1, buf, needed, &mut count) }.is_ok()
     });
     let jobs = match &jobs_buf {
-        Some(buf) if count > 0 => unsafe {
+        Some(buf) if count > 0 && count as usize * std::mem::size_of::<JOB_INFO_1W>() <= buf.len() * 8 => unsafe {
             std::slice::from_raw_parts(buf.as_ptr() as *const JOB_INFO_1W, count as usize)
         },
         _ => &[],
@@ -322,6 +378,11 @@ fn trays(name: &HSTRING) -> Vec<(i16, String)> {
 }
 
 pub fn capabilities(printer: &str) -> Result<Capabilities, String> {
+    let printer = printer.to_string();
+    on_spooler_thread(move || capabilities_impl(&printer))?
+}
+
+fn capabilities_impl(printer: &str) -> Result<Capabilities, String> {
     let name = HSTRING::from(printer);
     let handle = PrinterHandle::open(&name)?;
     let dm = handle.default_devmode(&name)?;
@@ -450,6 +511,30 @@ fn sheet_devmode(
 }
 
 pub fn print(
+    printer: &str,
+    pdf: &Path,
+    sheets: &[Sheet],
+    o: &DeviceOptions,
+) -> Result<Option<String>, String> {
+    let (printer, pdf, sheets) = (printer.to_string(), pdf.to_path_buf(), sheets.to_vec());
+    let (job_name, paper, tray) = (o.job_name.to_string(), o.paper.clone(), o.tray.map(str::to_string));
+    let (copies, collate, duplex, color, dpi) = (o.copies, o.collate, o.duplex, o.color, o.dpi);
+    on_spooler_thread(move || {
+        let options = DeviceOptions {
+            job_name: &job_name,
+            copies,
+            collate,
+            paper: &paper,
+            duplex,
+            color,
+            tray: tray.as_deref(),
+            dpi,
+        };
+        print_impl(&printer, &pdf, &sheets, &options)
+    })?
+}
+
+fn print_impl(
     printer: &str,
     pdf: &Path,
     sheets: &[Sheet],

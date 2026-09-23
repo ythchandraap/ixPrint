@@ -9,7 +9,9 @@ use crate::server::{job_status_json, printer_views, PrinterView};
 use crate::settings::PrintSettings;
 use crate::{layout, printer};
 use local_ip_address::local_ip;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::State;
 
 type AppStateRef<'a> = State<'a, Arc<AppState>>;
@@ -42,6 +44,26 @@ pub async fn open_docs(app: tauri::AppHandle, state: AppStateRef<'_>, external: 
         .build()
         .map(|_| ())
         .map_err(|e| e.to_string())
+}
+
+/// The folder where ix.print stores config, history and job files.
+#[tauri::command]
+pub fn data_folder_path(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri::Manager;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(dir.to_string_lossy().into_owned())
+}
+
+/// Opens that folder in the OS file explorer, with config.json selected
+/// when it already exists.
+#[tauri::command]
+pub fn open_data_folder(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    use tauri_plugin_opener::OpenerExt;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let config_file = dir.join("config.json");
+    let target = if config_file.exists() { config_file } else { dir };
+    app.opener().reveal_item_in_dir(target).map_err(|e| e.to_string())
 }
 
 /// LAN address of this computer; `None` when it has no network connection.
@@ -290,6 +312,174 @@ pub async fn job_status(state: AppStateRef<'_>, job_id: String) -> Result<serde_
     blocking(move || job_status_json(&state, &job_id))
         .await?
 		.ok_or_else(|| "Job not found".to_string())
+}
+
+/// Sends the desktop form through the same authenticated HTTP endpoint used by
+/// external clients. The process-only key never leaves Rust or appears in logs.
+#[tauri::command]
+pub async fn app_print(
+    state: AppStateRef<'_>,
+    json_body: Option<String>,
+    pdf_path: Option<String>,
+    preset: Option<String>,
+    settings: PrintSettings,
+) -> Result<JobResult, String> {
+    let state = state.inner().clone();
+    if !state.config.get().bridge_enabled {
+        return Err("Print service is disabled. Turn on the bridge in the status bar, then try again.".into());
+    }
+    if json_body.is_some() == pdf_path.is_some() {
+        return Err("Choose exactly one source: JSON data or a PDF file.".into());
+    }
+    blocking(move || submit_to_print_endpoint(&state, json_body, pdf_path, preset, settings)).await?
+}
+
+fn submit_to_print_endpoint(
+    state: &AppState,
+    json_body: Option<String>,
+    pdf_path: Option<String>,
+    preset: Option<String>,
+    settings: PrintSettings,
+) -> Result<JobResult, String> {
+    let port = state.config.get().server_port;
+    let endpoint = format!("http://127.0.0.1:{}/print", port);
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(600)))
+        .http_status_as_error(false)
+        .max_redirects(0)
+        .max_redirects_will_error(false)
+        .user_agent(concat!("ix.print/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .into();
+
+    let mut response = if let Some(body) = json_body {
+        agent
+            .post(&endpoint)
+            .header("Content-Type", "application/json")
+            .header("X-IxPrint-Desktop", &state.desktop_key)
+            .send(body)
+    } else if let Some(path) = pdf_path {
+        let path = PathBuf::from(path);
+        if !path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("pdf")) {
+            return Err("Choose a PDF file with the .pdf extension.".into());
+        }
+        let mut params = Vec::new();
+        if let Some(preset) = preset.filter(|p| !p.trim().is_empty()) {
+            params.push(("preset", preset));
+        }
+        let settings_json = serde_json::to_value(&settings).map_err(|_| "Could not read print settings".to_string())?;
+        if let Some(values) = settings_json.as_object() {
+            for (name, value) in values {
+                if value.is_null() { continue; }
+                let value = value.as_str().map(str::to_owned).unwrap_or_else(|| value.to_string());
+                params.push((name.as_str(), value));
+            }
+        }
+        let query = params
+            .iter()
+            .map(|(name, value)| format!("{}={}", encode_query(name), encode_query(value)))
+            .collect::<Vec<_>>()
+            .join("&");
+        let url = if query.is_empty() { endpoint } else { format!("{}?{}", endpoint, query) };
+        let form = ureq::unversioned::multipart::Form::new()
+            .file("file", &path)
+            .map_err(|_| format!("Could not read PDF file: {}", path.file_name().unwrap_or_default().to_string_lossy()))?;
+        agent
+            .post(&url)
+            .header("X-IxPrint-Desktop", &state.desktop_key)
+            .send(form)
+    } else {
+        return Err("Choose JSON data or a PDF file before printing.".into());
+    }
+    .map_err(|_| format!("Could not reach the local print service on port {}. Check that the bridge is running; check History before retrying in case the job was already submitted.", port))?;
+
+    let status = response.status();
+    let body = response.body_mut().read_to_string().unwrap_or_default();
+    let value: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
+    if !status.is_success() {
+        let message = value.get("message").and_then(serde_json::Value::as_str).unwrap_or("The print service rejected the request");
+        return Err(if status.as_u16() == 401 {
+            "The desktop print request was denied. Restart ix.print and try again.".into()
+        } else {
+            format!("Print request failed (HTTP {}): {}", status, message)
+        });
+    }
+    serde_json::from_value(value).map_err(|_| "The print service returned an unreadable job result. Check History before retrying.".into())
+}
+
+fn encode_query(value: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push('%');
+            encoded.push(HEX[(byte >> 4) as usize] as char);
+            encoded.push(HEX[(byte & 0x0f) as usize] as char);
+        }
+    }
+    encoded
+}
+
+/// PNG data URL of the first sheet a PDF file would print as, laid out with
+/// `layout::build` — the exact same code path the real print job uses — so
+/// the preview matches the printed output 1:1.
+#[tauri::command]
+pub async fn preview_pdf_sheet(
+    state: AppStateRef<'_>,
+    pdf_path: String,
+    preset: Option<String>,
+    settings: PrintSettings,
+) -> Result<String, String> {
+    let state = state.inner().clone();
+    blocking(move || render_pdf_sheet_preview(&state, &pdf_path, preset, settings)).await?
+}
+
+fn render_pdf_sheet_preview(
+    state: &AppState,
+    pdf_path: &str,
+    preset: Option<String>,
+    settings: PrintSettings,
+) -> Result<String, String> {
+    use base64::Engine;
+
+    let path = PathBuf::from(pdf_path);
+    if !path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("pdf")) {
+        return Err("Choose a PDF file with the .pdf extension.".into());
+    }
+    let config = state.config.get();
+    let preset_settings = match preset.as_deref().filter(|p| !p.trim().is_empty()) {
+        Some(name) => config
+            .presets
+            .get(name)
+            .map(|p| p.settings.clone())
+            .ok_or_else(|| format!("Preset '{}' was not found", name))?,
+        None => Default::default(),
+    };
+    let merged = preset_settings.overlay(&settings);
+    merged.validate()?;
+
+    let printer_name = merged.printer.clone().or_else(|| state.default_printer()).unwrap_or_default();
+    let job = crate::settings::JobSettings::resolve(&merged, printer_name.clone());
+    let default_paper = if job.paper == crate::settings::Paper::PrinterDefault && !printer_name.is_empty() {
+        printer::default_paper_mm(&printer_name)
+    } else {
+        (210.0, 297.0)
+    };
+
+    let tmp = state.jobs_dir.join(format!("preview-{}.pdf", uuid::Uuid::new_v4()));
+    let result = (|| -> Result<String, String> {
+        layout::build(&path, &tmp, &job, default_paper)?;
+        let pdfium = layout::pdfium()?;
+        let doc = pdfium
+            .load_pdf_from_file(&tmp, None)
+            .map_err(|e| format!("Could not open the laid-out sheet: {}", e))?;
+        let png = crate::template::render_page_png(&doc, 0, 6.0)?;
+        Ok(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png)))
+    })();
+    let _ = std::fs::remove_file(&tmp);
+    result
 }
 
 // ---- printer devices (OS level; not exposed over HTTP) ----------------------
@@ -672,4 +862,177 @@ pub async fn test_print(
     blocking(move || job::run(&state, request))
         .await?
         .map_err(|e| e.message().to_string())
+}
+
+#[cfg(test)]
+mod desktop_print_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    fn mock_endpoint() -> (u16, thread::JoinHandle<Vec<u8>>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            let mut request = Vec::new();
+            loop {
+                let mut chunk = [0; 8192];
+                let read = stream.read(&mut chunk).unwrap();
+                if read == 0 { break; }
+                request.extend_from_slice(&chunk[..read]);
+                let Some(split) = request.windows(4).position(|w| w == b"\r\n\r\n") else { continue };
+                let headers = String::from_utf8_lossy(&request[..split]).to_ascii_lowercase();
+                let body = &request[split + 4..];
+                let complete = if let Some(len) = headers.lines().find_map(|line| {
+                    line.strip_prefix("content-length:").and_then(|v| v.trim().parse::<usize>().ok())
+                }) {
+                    body.len() >= len
+                } else {
+                    body.windows(5).any(|w| w == b"0\r\n\r\n")
+                };
+                if complete { break; }
+            }
+            let body = br#"{"job_id":"mock-job","printer":"Mock printer","sheets":3}"#;
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
+            stream.write_all(body).unwrap();
+            request
+        });
+        (port, server)
+    }
+
+    fn mock_state(port: u16) -> AppState {
+        let dir = std::env::temp_dir().join(format!("ixprint-app-post-{}", uuid::Uuid::new_v4()));
+        let config = crate::config::ConfigStore::load(&dir);
+        config.update(|c| { c.server_port = port; Ok(()) }).unwrap();
+        AppState {
+            config,
+            desktop_key: "private-test-key".into(),
+            remotes: crate::remote::RemoteStore::load(&dir),
+            remote_cache: Default::default(),
+            server_error: Default::default(),
+            server_handle: Default::default(),
+            token_usage: Default::default(),
+            failed_auth: Default::default(),
+            history: crate::history::History::new(dir.join("history")),
+            diagnostics: crate::diagnostics::Diagnostics::new(&dir),
+            jobs_dir: dir.join("jobs"),
+        }
+    }
+
+    fn headers_and_body(request: &[u8]) -> (String, String) {
+        let split = request.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+        (
+            String::from_utf8_lossy(&request[..split]).to_string(),
+            String::from_utf8_lossy(&request[split + 4..]).to_string(),
+        )
+    }
+
+    #[test]
+    fn desktop_print_posts_json_and_pdf_with_requested_copies() {
+        for copies in [1, 4] {
+            let (port, server) = mock_endpoint();
+            let state = mock_state(port);
+            let body = format!(r#"{{"preset":"label","data":{{"name":"Example"}},"settings":{{"copies":{}}}}}"#, copies);
+            let result = submit_to_print_endpoint(&state, Some(body), None, None, PrintSettings::default()).unwrap();
+            let (headers, payload) = headers_and_body(&server.join().unwrap());
+            assert_eq!(result.job_id, "mock-job");
+            assert_eq!(result.sheets, 3);
+            assert!(headers.starts_with("POST /print HTTP/1.1"));
+            assert!(headers.to_ascii_lowercase().contains("content-type: application/json"));
+            assert!(headers.to_ascii_lowercase().contains("x-ixprint-desktop: private-test-key"));
+            assert!(payload.contains(&format!("\"copies\":{}", copies)));
+        }
+
+        let dir = std::env::temp_dir().join(format!("ixprint-pdf-source-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pdf = dir.join("source.pdf");
+        std::fs::write(&pdf, b"%PDF-1.4\nmock document").unwrap();
+        for copies in [1, 4] {
+            let (port, server) = mock_endpoint();
+            let state = mock_state(port);
+            let settings = PrintSettings { copies: Some(copies), printer: Some("Mock Printer / 1".into()), ..Default::default() };
+            let result = submit_to_print_endpoint(
+                &state,
+                None,
+                Some(pdf.to_string_lossy().into_owned()),
+                Some("receipt".into()),
+                settings,
+            )
+            .unwrap();
+            let (headers, payload) = headers_and_body(&server.join().unwrap());
+            assert_eq!(result.job_id, "mock-job");
+            assert!(headers.starts_with("POST /print?"));
+            assert!(headers.contains("preset=receipt"));
+            assert!(headers.contains(&format!("copies={}", copies)));
+            assert!(headers.contains("printer=Mock%20Printer%20%2F%201"));
+            assert!(headers.to_ascii_lowercase().contains("content-type: multipart/form-data; boundary="));
+            assert!(headers.to_ascii_lowercase().contains("x-ixprint-desktop: private-test-key"));
+            assert!(payload.contains("filename=\"source.pdf\""));
+            assert!(payload.contains("%PDF-1.4"));
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[cfg(test)]
+mod preview_pdf_tests {
+    use super::*;
+
+    fn mock_state(dir: &std::path::Path) -> AppState {
+        std::fs::create_dir_all(dir.join("jobs")).unwrap();
+        AppState {
+            config: crate::config::ConfigStore::load(dir),
+            desktop_key: "test-desktop-key".into(),
+            remotes: crate::remote::RemoteStore::load(dir),
+            remote_cache: Default::default(),
+            server_error: Default::default(),
+            server_handle: Default::default(),
+            token_usage: Default::default(),
+            failed_auth: Default::default(),
+            history: crate::history::History::new(dir.join("history")),
+            diagnostics: crate::diagnostics::Diagnostics::new(dir),
+            jobs_dir: dir.join("jobs"),
+        }
+    }
+
+    /// The preview PNG must be the same sheet size `layout::build` would print,
+    /// scaled by the design's own width/height — i.e. portrait vs. landscape
+    /// tracks the requested orientation.
+    #[test]
+    fn preview_matches_requested_orientation() {
+        crate::layout::tests::init_for_tests();
+        let dir = std::env::temp_dir().join(format!("ixprint-preview-{}", uuid::Uuid::new_v4()));
+        let state = mock_state(&dir);
+        let pdf = dir.join("source.pdf");
+        crate::testpage::generate(&pdf, 210.0, 297.0, &["test".into()], 1).unwrap();
+
+        let settings = PrintSettings {
+            paper: Some("A4".parse().unwrap()),
+            orientation: Some("landscape".parse().unwrap()),
+            ..Default::default()
+        };
+        let url = render_pdf_sheet_preview(&state, pdf.to_str().unwrap(), None, settings).unwrap();
+        assert!(url.starts_with("data:image/png;base64,"));
+        let png = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &url["data:image/png;base64,".len()..]).unwrap();
+        let mut decoder = png::Decoder::new(png.as_slice());
+        decoder.set_transformations(png::Transformations::normalize_to_color8());
+        let reader = decoder.read_info().unwrap();
+        let (w, h) = (reader.info().width, reader.info().height);
+        assert!(w > h, "landscape A4 preview should be wider than tall, got {}x{}", w, h);
+
+        // No PDF extension: rejected before touching PDFium or the filesystem.
+        let err = render_pdf_sheet_preview(&state, "source.txt", None, PrintSettings::default()).unwrap_err();
+        assert!(err.contains(".pdf"));
+
+        // Unknown preset: rejected before rendering.
+        let err = render_pdf_sheet_preview(&state, pdf.to_str().unwrap(), Some("nope".into()), PrintSettings::default()).unwrap_err();
+        assert!(err.contains("was not found"));
+
+        // Temp file cleaned up either way.
+        assert_eq!(std::fs::read_dir(dir.join("jobs")).unwrap().count(), 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

@@ -259,6 +259,18 @@ watch(
 	{ immediate: true, deep: true },
 );
 
+function resetPaperLayoutFields() {
+	form.paperMode = "";
+	form.customW = "";
+	form.customH = "";
+	form.orientation = "";
+	form.scaleMode = "";
+	form.scalePercent = "100";
+	form.align = "";
+	form.margins.splice(0, form.margins.length, "", "", "", "");
+	form.pages = "";
+}
+
 /** Starter design, sized from the preset's custom paper when there is one. */
 function newDesign(): Template {
 	const w = form.paperMode === "custom" ? (num(form.customW) ?? 60) : 60;
@@ -277,8 +289,12 @@ function newDesign(): Template {
 
 /** The design editor saves the whole preset in one go. */
 function applyDesign(d: Template) {
+	const isNewDesign = !design.value;
 	design.value = d;
 	editingDesign.value = false;
+	if (isNewDesign) {
+		resetPaperLayoutFields();
+	}
 	save();
 }
 

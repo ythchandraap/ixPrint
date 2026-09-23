@@ -94,7 +94,7 @@ onMounted(load);
 
 <template>
 	<section class="stack">
-		<p class="hint">Use printers connected to another computer running ix.print. Create an API token on that computer (Settings → API), then paste it here.</p>
+		<p class="hint">Create an API token on that computer first (Settings → API), then paste it here.</p>
 		<p v-if="loading" class="muted">Loading remote computers…</p>
 		<div v-for="remote in remotes" :key="remote.id" class="card stack tight">
 			<div class="row">

@@ -18,7 +18,7 @@ const props = defineProps<{
 const emit = defineEmits<{
 	(e: "config", config: Config): void;
 	(e: "notify", message: string, error?: boolean): void;
-	(e: "test", preset: string): void;
+	(e: "open-print", preset: string): void;
 }>();
 
 type View =
@@ -164,7 +164,7 @@ function imported(config: Config, list: string[]) {
 			<button class="icon" :title="config.default_preset === name ? 'Remove as default' : 'Set as default'" @click="toggleDefault(name)">
 				<Star :size="16" :fill="config.default_preset === name ? 'currentColor' : 'none'" />
 			</button>
-			<button class="icon" :title="config.presets[name].design ? `Print design with sample data (${testPages} pages)` : `Test paper edges with this preset (${testPages} pages)`" @click="emit('test', name)"><Printer :size="16" /></button>
+			<button class="icon" :title="config.presets[name].design ? `Open sample print for this preset (${testPages} pages)` : `Open calibration print for this preset (${testPages} pages)`" @click="emit('open-print', name)"><Printer :size="16" /></button>
 			<button class="icon" title="Edit" @click="view = { kind: 'edit', name, settings: config.presets[name] }"><Pencil :size="16" /></button>
 			<button class="icon danger" title="Remove" @click="remove(name)"><Trash2 :size="16" /></button>
 		</div>

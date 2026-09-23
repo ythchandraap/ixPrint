@@ -65,7 +65,7 @@ pub fn find<'a>(tokens: &'a [ApiToken], provided: &str) -> Option<&'a ApiToken> 
         .fold(None, |found, t| if ct_eq(t.hash.as_bytes(), h.as_bytes()) { Some(t) } else { found })
 }
 
-fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
