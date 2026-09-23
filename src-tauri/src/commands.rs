@@ -614,6 +614,42 @@ pub fn history_page(
     state.history.read_page(&date, page, per_page, failed_only)
 }
 
+#[tauri::command]
+pub fn error_log(state: AppStateRef<'_>) -> Result<Vec<crate::diagnostics::DiagnosticEntry>, String> {
+    state.diagnostics.read()
+}
+
+#[tauri::command]
+pub fn record_error(
+    state: AppStateRef<'_>,
+    source: String,
+    message: String,
+    details: Option<String>,
+) -> Result<(), String> {
+    state.diagnostics.record("error", &source, &message, details.as_deref())
+}
+
+#[tauri::command]
+pub fn clear_error_log(state: AppStateRef<'_>) -> Result<(), String> {
+    state.diagnostics.clear()
+}
+
+#[tauri::command]
+pub fn open_system_logs() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        std::process::Command::new("mmc.exe")
+            .arg("eventvwr.msc")
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("Could not open Windows Event Viewer: {}", e))
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Windows Event Viewer is only available on Windows".into())
+    }
+}
+
 /// Prints `pages` edge-to-edge calibration pages at the sheet size of the preset/printer.
 #[tauri::command]
 pub async fn test_print(

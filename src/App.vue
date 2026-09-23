@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { ArrowLeft, ChevronDown, Copy, MonitorX, Printer, Settings } from "lucide-vue-next";
@@ -7,6 +7,7 @@ import { api, describeJob, errorText, isInApp, FINAL_STATES, type Config, type J
 import PrintersTab from "./components/PrintersTab.vue";
 import PresetsTab from "./components/PresetsTab.vue";
 import HistoryTab from "./components/HistoryTab.vue";
+import ErrorLogPanel from "./components/ErrorLogPanel.vue";
 import SettingsView from "./components/SettingsView.vue";
 import EmptyState from "./components/EmptyState.vue";
 import OnboardingDialog from "./components/OnboardingDialog.vue";
@@ -49,6 +50,7 @@ function notify(text: string, error = false) {
 	toast.value = { text, error };
 	clearTimeout(toastTimer);
 	toastTimer = window.setTimeout(() => (toast.value = null), error ? 6000 : 3000);
+	if (error && inApp) void api.recordError("ui-notification", text).catch(() => {});
 }
 
 function needsOnboarding() {
@@ -308,8 +310,13 @@ onMounted(async () => {
 	if (!inApp) return; // opened in a normal browser: nothing to talk to
 	onboardingOpen.value = needsOnboarding();
 	unlistenTray = await listen<string>("tray-navigate", (event) => {
-		settingsOpen.value = false;
-		tab.value = event.payload === "history" ? "history" : "printers";
+		if (event.payload === "errors") {
+			settingsOpen.value = true;
+			nextTick(() => document.getElementById("error-logs")?.scrollIntoView({ block: "start", behavior: "smooth" }));
+		} else {
+			settingsOpen.value = false;
+			tab.value = event.payload === "history" ? "history" : "printers";
+		}
 	});
 	unlistenBridge = await listen<boolean>("bridge-changed", (event) => {
 		bridgeEnabled.value = event.payload;
@@ -489,6 +496,7 @@ onBeforeUnmount(() => {
 			<EmptyState :icon="MonitorX" tone="warn" title="Settings could not be loaded" :text="configError">
 				<button class="primary small" @click="reload">Try again</button>
 			</EmptyState>
+			<ErrorLogPanel v-if="settingsOpen" :show-system-logs="os === 'windows'" @copy="copy" @notify="notify" />
 		</main>
 		<main v-else-if="!config">
 			<p class="muted center-text">Loading…</p>
@@ -498,6 +506,7 @@ onBeforeUnmount(() => {
 				v-if="settingsOpen"
 				:config="config"
 				:local-ip="localIp"
+				:os="os"
 				@config="setConfig"
 				@notify="notify"
 				@copy="copy"

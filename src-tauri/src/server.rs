@@ -770,6 +770,7 @@ mod tests {
             token_usage: Default::default(),
             failed_auth: Default::default(),
             history: History::new(dir.join("history")),
+            diagnostics: crate::diagnostics::Diagnostics::new(&dir),
             jobs_dir: dir.join("jobs"),
         })
     }

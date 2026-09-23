@@ -405,6 +405,14 @@ export interface HistoryPage {
 	per_page: number;
 }
 
+export interface DiagnosticEntry {
+	time: string;
+	level: string;
+	source: string;
+	message: string;
+	details?: string;
+}
+
 export interface JobResult {
 	job_id: string;
 	printer: string;
@@ -471,6 +479,11 @@ export const api = {
 	historyDays: () => invoke<HistoryDay[]>("history_days"),
 	historyPage: (date: string, page: number, perPage: number, failedOnly: boolean) =>
 		invoke<HistoryPage>("history_page", { date, page, perPage, failedOnly }),
+	errorLog: () => invoke<DiagnosticEntry[]>("error_log"),
+	recordError: (source: string, message: string, details?: string) =>
+		invoke<void>("record_error", { source, message, details: details ?? null }),
+	clearErrorLog: () => invoke<void>("clear_error_log"),
+	openSystemLogs: () => invoke<void>("open_system_logs"),
 	testPrint: (printer: string | null, preset: string | null, pages = 1) =>
 		invoke<JobResult>("test_print", { printer, preset, pages }),
 };
