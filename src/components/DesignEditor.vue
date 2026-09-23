@@ -252,6 +252,8 @@ function add(type: Exclude<TemplateElement["type"], "image">) {
 						? { type, id: newId(), x: m, y: m, w: Math.min(50, W - 2 * m), h: Math.min(12, H - 2 * m), value: "{{kode}}", show_text: true }
 						: { type, id: newId(), x: m, y: m, size: Math.min(20, W - 2 * m, H - 2 * m), value: "{{kode}}" };
 	t.elements.push(el);
+	if (el.type === "text") ensureSample("kolom");
+	else if (el.type === "barcode" || el.type === "qr") ensureSample("kode");
 	selected.value = t.elements.length - 1;
 }
 
@@ -365,6 +367,9 @@ function useImageField(el: TemplateElement, field: string) {
 
 // ---- data fields ----------------------------------------------------------
 const fields = computed(() => templateFields(t));
+function ensureSample(field: string) {
+	if (!(field in t.sample) || !t.sample[field]) t.sample[field] = "Contoh";
+}
 /** {{no}}, {{halaman}}... used by the design: filled automatically unless given. */
 const autoFields = computed(() => templateAutoFields(t));
 const AUTO_HINT: Record<string, string> = {
@@ -374,13 +379,18 @@ const AUTO_HINT: Record<string, string> = {
 	jumlah_data: "item count",
 };
 watch(fields, (list) => {
-	for (const f of list) if (!(f in t.sample)) t.sample[f] = "";
-});
+	for (const f of list) if (!(f in t.sample)) t.sample[f] = "Contoh";
+}, { immediate: true });
 function insertField(field: string) {
 	const el = current.value;
 	if (!el) return;
-	if (el.type === "text") el.text += `{{${field}}}`;
-	else if (el.type === "barcode" || el.type === "qr") el.value = `{{${field}}}`;
+	if (el.type === "text") {
+		el.text += `{{${field}}}`;
+		ensureSample(field);
+	} else if (el.type === "barcode" || el.type === "qr") {
+		el.value = `{{${field}}}`;
+		ensureSample(field);
+	}
 }
 const newField = ref("");
 function addField() {
@@ -655,6 +665,7 @@ function save() {
 
 		<fieldset>
 			<legend>Sample data</legend>
+			<p class="hint">Enter example values to see dynamic text in the design preview and test print. New fields start with “Contoh”.</p>
 			<p v-if="!fields.length" class="hint">No fields yet. Write {{ "{" + "{field}" + "}" }} in text, barcode or QR content.</p>
 			<template v-if="autoFields.length">
 				<p class="hint">Automatic fields — leave blank for ix.print to fill, or enter your own value (the web app may also send it):</p>
@@ -672,7 +683,7 @@ function save() {
 			<div class="grid2">
 				<label v-for="f in fields" :key="f" class="field">
 					<span>{{ f }}</span>
-					<input v-model="t.sample[f]" />
+					<input v-model="t.sample[f]" placeholder="e.g. Product name" />
 				</label>
 			</div>
 		</fieldset>

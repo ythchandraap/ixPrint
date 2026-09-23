@@ -3,10 +3,11 @@ import { ref, watch } from "vue";
 import { BookOpen, ExternalLink, Network, Server, ShieldCheck } from "lucide-vue-next";
 import { api, errorText, type Config } from "../api";
 import ApiTab from "./ApiTab.vue";
+import ErrorLogPanel from "./ErrorLogPanel.vue";
 import RemotesPanel from "./RemotesPanel.vue";
 import SettingInfo from "./SettingInfo.vue";
 
-const props = defineProps<{ config: Config; localIp: string }>();
+const props = defineProps<{ config: Config; localIp: string; os: string }>();
 const emit = defineEmits<{
 	(e: "config", config: Config): void;
 	(e: "notify", message: string, error?: boolean): void;
@@ -47,6 +48,7 @@ async function savePort() {
 			<strong>Connection, access and data controls</strong>
 			<p class="hint">These settings decide how web apps reach ix.print, how requests are protected, and which other computers may use its printers.</p>
 		</div>
+		<ErrorLogPanel :show-system-logs="props.os === 'windows'" @copy="emit('copy', $event)" @notify="(m, e) => emit('notify', m, e)" />
 
 		<section class="settings-group">
 			<div class="settings-group-heading">
