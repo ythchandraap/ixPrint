@@ -319,6 +319,7 @@ mod tests {
             token_usage: Default::default(),
             failed_auth: Default::default(),
             history: crate::history::History::new(dir.join("history")),
+            diagnostics: crate::diagnostics::Diagnostics::new(&dir),
             jobs_dir: dir.join("jobs"),
         });
         let job = JobResult { job_id: "job-1".into(), printer: "EPSON".into(), preset: Some("struk".into()), sheets: 2, spooler_job: None };

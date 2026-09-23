@@ -3,6 +3,7 @@ mod callback;
 mod canvas;
 mod commands;
 mod config;
+mod diagnostics;
 mod history;
 mod job;
 mod layout;
@@ -56,7 +57,8 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         None::<&str>,
     )?;
 	let printers_item = MenuItem::with_id(app, "view-printers", "View printers", true, None::<&str>)?;
-	let history_item = MenuItem::with_id(app, "view-history", "View history log", true, None::<&str>)?;
+    let history_item = MenuItem::with_id(app, "view-history", "View history log", true, None::<&str>)?;
+	let errors_item = MenuItem::with_id(app, "view-errors", "View error log", true, None::<&str>)?;
 	let open_item = MenuItem::with_id(app, "open", "Open ix.print", true, None::<&str>)?;
 	let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
@@ -69,6 +71,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
             &separator,
             &printers_item,
             &history_item,
+			&errors_item,
             &open_item,
             &separator2,
             &quit_item,
@@ -105,6 +108,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
             }
             "view-printers" => focus_main(app, Some("printers")),
             "view-history" => focus_main(app, Some("history")),
+			"view-errors" => focus_main(app, Some("errors")),
             "open" => focus_main(app, None),
             "quit" => app.exit(0),
             _ => {}
@@ -142,10 +146,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            if let Err(e) = layout::init(&pdfium_dirs(app)) {
-                eprintln!("{}", e);
-            }
-
             let data_dir = app.path().app_data_dir()?;
             // Config (token hashes, presets), history and print jobs: owner only.
             std::fs::create_dir_all(&data_dir)?;
@@ -154,6 +154,14 @@ pub fn run() {
                 use std::os::unix::fs::PermissionsExt;
                 std::fs::set_permissions(&data_dir, std::fs::Permissions::from_mode(0o700))?;
             }
+            let diagnostics = diagnostics::Diagnostics::new(&data_dir);
+            diagnostics.start_session();
+            diagnostics.install_panic_hook();
+            if let Err(e) = layout::init(&pdfium_dirs(app)) {
+                let _ = diagnostics.record("error", "pdf-engine", &e, None);
+                eprintln!("{}", e);
+            }
+
             let jobs_dir = data_dir.join("jobs");
             // Leftovers from a crash may contain documents; don't keep them around.
             let _ = std::fs::remove_dir_all(&jobs_dir);
@@ -173,6 +181,7 @@ pub fn run() {
                 token_usage: Default::default(),
                 failed_auth: Default::default(),
                 history,
+                diagnostics,
                 jobs_dir,
             });
             app.manage(state.clone());
@@ -227,8 +236,26 @@ pub fn run() {
             commands::apply_import,
             commands::history_days,
             commands::history_page,
+            commands::error_log,
+            commands::record_error,
+            commands::clear_error_log,
+            commands::open_system_logs,
             commands::test_print,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                let state = app.state::<Arc<AppState>>();
+                state.inner().diagnostics.finish_session();
+            }
+        });
 }

@@ -22,6 +22,7 @@ pub struct AppState {
     /// Clients locked out after repeatedly sending wrong tokens.
     pub failed_auth: crate::auth::FailedAttempts,
     pub history: History,
+    pub diagnostics: crate::diagnostics::Diagnostics,
     /// Scratch space for uploads and print-ready PDFs; files are deleted after each job.
     pub jobs_dir: PathBuf,
 }
@@ -157,6 +158,7 @@ pub fn run(state: &AppState, req: JobRequest) -> Result<JobResult, JobError> {
             }
         }
         let mut job = JobSettings::resolve(&merged, printer_name.clone());
+        let _active_job = state.diagnostics.begin_job(&job_id, req.source, &printer_name).ok();
 
         let default_paper = if job.paper == Paper::PrinterDefault {
             printer::default_paper_mm(&printer_name)
@@ -246,6 +248,9 @@ pub fn run(state: &AppState, req: JobRequest) -> Result<JobResult, JobError> {
     record.duration_ms = started.elapsed().as_millis() as u64;
     if let Err(e) = state.history.append(&record) {
 		eprintln!("Failed to write history: {}", e);
+    }
+    if let Err(e) = &result {
+        let _ = state.diagnostics.record("error", req.source, e.message(), None);
     }
     result
 }
