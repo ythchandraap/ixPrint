@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { ArrowDown, ArrowUp, Barcode, Copy, Image as ImageIcon, Minus, QrCode, Square, Trash2, Type } from "lucide-vue-next";
+import { ArrowDown, ArrowUp, Barcode, ClipboardPaste, Copy, Image as ImageIcon, Minus, QrCode, Square, Trash2, Type } from "lucide-vue-next";
 import {
 	api,
 	errorText,
@@ -92,6 +92,8 @@ async function showPrintPreview() {
 	}
 }
 const selected = ref<number | null>(null);
+const copiedElement = ref<TemplateElement | null>(null);
+const pasteCount = ref(0);
 const preview = ref("");
 const previewError = ref("");
 
@@ -103,11 +105,22 @@ const newId = () => Math.random().toString(36).slice(2, 10);
 const holder = ref<HTMLElement | null>(null);
 const holderWidth = ref(360);
 let observer: ResizeObserver | undefined;
+let resizeFrame: number | undefined;
 onMounted(() => {
-	observer = new ResizeObserver(([entry]) => (holderWidth.value = entry.contentRect.width));
+	observer = new ResizeObserver(([entry]) => {
+		const width = entry.contentRect.width;
+		if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
+		resizeFrame = requestAnimationFrame(() => {
+			resizeFrame = undefined;
+			if (Math.abs(holderWidth.value - width) > 0.25) holderWidth.value = width;
+		});
+	});
 	if (holder.value) observer.observe(holder.value);
 });
-onBeforeUnmount(() => observer?.disconnect());
+onBeforeUnmount(() => {
+	observer?.disconnect();
+	if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
+});
 
 /** Screen pixels per mm: fit the width, keep tall labels within ~560 px. */
 const scale = computed(() =>
@@ -214,9 +227,20 @@ function endDrag() {
 onBeforeUnmount(endDrag);
 
 function onKey(e: KeyboardEvent) {
-	if (selected.value === null) return;
 	const target = e.target as HTMLElement;
-	if (target.closest("input, textarea, select")) return;
+	if (target.closest("input, textarea, select, [contenteditable=true]")) return;
+	const modifier = e.metaKey || e.ctrlKey;
+	if (modifier && e.key.toLowerCase() === "c" && selected.value !== null) {
+		e.preventDefault();
+		copySelected();
+		return;
+	}
+	if (modifier && e.key.toLowerCase() === "v" && copiedElement.value) {
+		e.preventDefault();
+		pasteCopied();
+		return;
+	}
+	if (selected.value === null || !target.closest(".stage")) return;
 	const step = e.shiftKey ? 5 : SNAP;
 	const moves: Record<string, [number, number]> = {
 		ArrowLeft: [-step, 0],
@@ -263,26 +287,56 @@ function removeSelected() {
 	selected.value = null;
 }
 
-function duplicateSelected() {
+function copySelected() {
 	if (selected.value === null) return;
-	const copy = clone(t.elements[selected.value]);
+	copiedElement.value = clone(t.elements[selected.value]);
+	pasteCount.value = 0;
+}
+
+function pasteCopied() {
+	if (!copiedElement.value) return;
+	const copy = clone(copiedElement.value);
 	copy.id = newId();
-	moveBy(copy, 2, 2);
+	pasteCount.value += 1;
+	moveBy(copy, 2 * pasteCount.value, 2 * pasteCount.value);
 	t.elements.push(copy);
 	selected.value = t.elements.length - 1;
 }
 
+function duplicateSelected() {
+	copySelected();
+	pasteCopied();
+}
+
 /** Moves the selected element up/down the stacking order (later = on top). */
-function reorder(dir: -1 | 1) {
-	const i = selected.value;
-	if (i === null) return;
+function reorderAt(i: number, dir: -1 | 1) {
 	const j = i + dir;
 	if (j < 0 || j >= t.elements.length) return;
 	[t.elements[i], t.elements[j]] = [t.elements[j], t.elements[i]];
-	selected.value = j;
+	if (selected.value === i) selected.value = j;
+	else if (selected.value === j) selected.value = i;
+}
+
+function selectAndReorder(index: number, dir: -1 | 1) {
+	selected.value = index;
+	reorderAt(index, dir);
 }
 
 const current = computed(() => (selected.value === null ? null : t.elements[selected.value]));
+function layerLabel(el: TemplateElement) {
+	switch (el.type) {
+		case "text": return `Text · ${el.text.replace(/\s+/g, " ").trim() || "Empty"}`;
+		case "line": return "Line";
+		case "rect": return "Rectangle";
+		case "barcode": return `Barcode · ${el.value}`;
+		case "qr": return `QR code · ${el.value}`;
+		case "image": return `Image · ${el.src.startsWith("{{") ? el.src.slice(2, -2) : "Embedded image"}`;
+	}
+	return "Element";
+}
+const layerRows = computed(() =>
+	t.elements.map((element, index) => ({ element, index, label: layerLabel(element) })).reverse(),
+);
 
 // ---- images ---------------------------------------------------------------
 const MAX_IMAGE_PX = 1600;
@@ -449,7 +503,7 @@ function save() {
 </script>
 
 <template>
-	<form class="stack" @submit.prevent="save">
+	<form class="stack" @submit.prevent="save" @keydown="onKey">
 		<h3 class="section-title">Design{{ presetName ? ` preset "${presetName}"` : "" }}</h3>
 		<p class="hint">The preset paper size follows the design. Printer, X/Y offsets, copies and other settings come from the preset.</p>
 		<div class="segmented">
@@ -516,7 +570,6 @@ function save() {
 				tabindex="0"
 				:style="{ width: `${t.width_mm * scale}px`, height: `${canvasH * scale}px` }"
 				@pointerdown.self="selected = null"
-				@keydown="onKey"
 			>
 				<img v-if="preview" :src="preview" class="render" alt="" draggable="false" />
 				<template v-if="list">
@@ -561,6 +614,43 @@ function save() {
 		</div>
 		<p v-if="previewError" class="error">⚠ {{ previewError }}</p>
 		<p class="hint">Move elements with the mouse or arrow keys (Shift = 5 mm). The preview is the actual print output.</p>
+
+		<fieldset class="layers-panel">
+			<legend>Layers · {{ t.elements.length }}</legend>
+			<div class="row wrap layers-toolbar">
+				<span class="muted grow">Top layer appears first. Select a row to edit it.</span>
+				<button type="button" class="ghost small" :disabled="selected === null" title="Copy selected element (⌘/Ctrl+C)" @click="copySelected">
+					<Copy :size="14" /> Copy
+				</button>
+				<button type="button" class="ghost small" :disabled="!copiedElement" title="Paste element (⌘/Ctrl+V)" @click="pasteCopied">
+					<ClipboardPaste :size="14" /> Paste
+				</button>
+			</div>
+			<div v-if="layerRows.length" class="layers-list">
+				<div v-for="layer in layerRows" :key="layer.element.id" class="layer-row">
+					<button
+						type="button"
+						:class="['layer-select', { on: selected === layer.index }]"
+						:aria-pressed="selected === layer.index"
+						:title="layer.label"
+						@click="selected = layer.index"
+					>
+						<span class="layer-index">{{ t.elements.length - layer.index }}</span>
+						<span class="layer-label">{{ layer.label }}</span>
+					</button>
+					<div class="row tight layer-order-actions">
+						<button type="button" class="icon" title="Move forward" :aria-label="`Move ${layer.label} forward`" :disabled="layer.index === t.elements.length - 1" @click="selectAndReorder(layer.index, 1)">
+							<ArrowUp :size="14" />
+						</button>
+						<button type="button" class="icon" title="Move backward" :aria-label="`Move ${layer.label} backward`" :disabled="layer.index === 0" @click="selectAndReorder(layer.index, -1)">
+							<ArrowDown :size="14" />
+						</button>
+					</div>
+				</div>
+			</div>
+			<p v-else class="muted">No elements yet. Add an element above to start the design.</p>
+			<p class="meta">Copy and paste work inside this design. Pasted copies are offset slightly.</p>
+		</fieldset>
 
 		<!-- properties of the selected element -->
 		<fieldset v-if="current">
@@ -654,8 +744,6 @@ function save() {
 			</div>
 
 			<div class="row wrap">
-				<button type="button" class="icon" title="Move backwards" @click="reorder(-1)"><ArrowDown :size="16" /></button>
-				<button type="button" class="icon" title="Move forwards" @click="reorder(1)"><ArrowUp :size="16" /></button>
 				<button type="button" class="icon" title="Duplicate" @click="duplicateSelected"><Copy :size="16" /></button>
 				<span class="grow"></span>
 				<button type="button" class="icon danger" title="Remove element" @click="removeSelected"><Trash2 :size="16" /></button>
@@ -869,5 +957,68 @@ textarea {
 }
 .field-input {
 	width: 110px !important;
+}
+.layers-toolbar {
+	align-items: center;
+}
+.layers-list {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	max-height: 220px;
+	overflow-y: auto;
+}
+.layer-row {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+	padding: 2px;
+	border: 1px solid var(--line);
+	border-radius: var(--r-md);
+}
+.layer-select {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: 1;
+	min-width: 0;
+	min-height: 32px;
+	padding: 4px 6px;
+	border: 0;
+	border-radius: var(--r-sm);
+	background: transparent;
+	color: var(--text);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+.layer-select:hover,
+.layer-select.on {
+	background: var(--brand-pale);
+}
+.layer-select.on {
+	color: var(--brand);
+}
+.layer-index {
+	display: grid;
+	place-items: center;
+	width: 20px;
+	height: 20px;
+	flex: none;
+	border-radius: 5px;
+	background: var(--bg);
+	color: var(--muted);
+	font-family: var(--font-mono);
+	font-size: 10px;
+}
+.layer-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.layer-order-actions {
+	gap: 0;
 }
 </style>
