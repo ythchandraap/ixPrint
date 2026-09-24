@@ -1,0 +1,201 @@
+.design-editor .holder {
+	width: 100%;
+	overflow: auto;
+	display: flex;
+	justify-content: center;
+	padding: 8px 0;
+	background: repeating-conic-gradient(var(--line) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
+	border-radius: 8px;
+}
+.design-editor .stage {
+	position: relative;
+	background: #fff;
+	box-shadow: 0 1px 4px rgb(0 0 0 / 0.25);
+	outline: none;
+	flex: none;
+	touch-action: none;
+}
+.design-editor .render {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	pointer-events: none;
+	user-select: none;
+}
+.design-editor .box {
+	position: absolute;
+	border: 1px dashed rgb(59 130 246 / 0.45);
+	cursor: move;
+	box-sizing: border-box;
+}
+.design-editor .box.on {
+	border: 1.5px solid var(--brand);
+	background: rgb(59 130 246 / 0.06);
+}
+.design-editor .handle {
+	position: absolute;
+	width: 10px;
+	height: 10px;
+	background: var(--brand);
+	border: 2px solid #fff;
+	border-radius: 50%;
+	box-shadow: 0 0 2px rgb(0 0 0 / 0.4);
+}
+.design-editor .handle.br {
+	right: -6px;
+	bottom: -6px;
+	cursor: nwse-resize;
+}
+.design-editor .handle.end {
+	transform: translate(-50%, -50%);
+	cursor: crosshair;
+	z-index: 2;
+}
+.design-editor .toolbar {
+	gap: 4px;
+}
+.design-editor textarea {
+	font: inherit;
+	font-size: 14px;
+	color: var(--text);
+	background: var(--surface);
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	padding: 6px 8px;
+	resize: vertical;
+}
+.design-editor .image-thumb {
+	max-width: 80px;
+	max-height: 48px;
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	background: repeating-conic-gradient(var(--line) 0% 25%, #fff 0% 50%) 50% / 8px 8px;
+}
+.design-editor .segmented {
+	display: flex;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	overflow: hidden;
+}
+.design-editor .segmented button {
+	flex: 1;
+	min-height: var(--control-height);
+	border: none;
+	background: var(--surface);
+	color: var(--muted);
+	padding: 7px 4px;
+	font: inherit;
+	font-size: 12px;
+	cursor: pointer;
+}
+.design-editor .segmented button.on {
+	background: var(--brand-fill);
+	color: #fff;
+}
+.design-editor .band-line {
+	position: absolute;
+	left: 0;
+	right: 0;
+	border-top: 1px dashed var(--accent);
+	pointer-events: none;
+}
+.design-editor .band-label {
+	position: absolute;
+	right: 2px;
+	font-size: 9px;
+	font-weight: 600;
+	font-family: var(--font-mono);
+	letter-spacing: 0.04em;
+	color: var(--cobalt-deep);
+	background: rgb(255 255 255 / 0.85);
+	padding: 0 3px;
+	pointer-events: none;
+	transform: translateY(1px);
+}
+.design-editor .rows-input {
+	width: 80px !important;
+}
+.design-editor .pages {
+	display: flex;
+	gap: 8px;
+	overflow-x: auto;
+	padding-bottom: 4px;
+}
+.design-editor .pages figure {
+	margin: 0;
+	flex: none;
+	text-align: center;
+}
+.design-editor .pages img {
+	max-height: 220px;
+	border: 1px solid var(--line);
+	background: #fff;
+	display: block;
+}
+.design-editor .field-input {
+	width: 110px !important;
+}
+.design-editor .layers-toolbar {
+	align-items: center;
+}
+.design-editor .layers-list {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	max-height: 220px;
+	overflow-y: auto;
+}
+.design-editor .layer-row {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+	padding: 2px;
+	border: 1px solid var(--line);
+	border-radius: var(--r-md);
+}
+.design-editor .layer-select {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: 1;
+	min-width: 0;
+	min-height: 32px;
+	padding: 4px 6px;
+	border: 0;
+	border-radius: var(--r-sm);
+	background: transparent;
+	color: var(--text);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+.design-editor .layer-select:hover,
+.design-editor .layer-select.on {
+	background: var(--brand-pale);
+}
+.design-editor .layer-select.on {
+	color: var(--brand);
+}
+.design-editor .layer-index {
+	display: grid;
+	place-items: center;
+	width: 20px;
+	height: 20px;
+	flex: none;
+	border-radius: 5px;
+	background: var(--bg);
+	color: var(--muted);
+	font-family: var(--font-mono);
+	font-size: 10px;
+}
+.design-editor .layer-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.design-editor .layer-order-actions {
+	gap: 0;
+}
