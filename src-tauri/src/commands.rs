@@ -792,7 +792,7 @@ pub fn export_presets(
     let bundle = PresetBundle::from_config(&state.config.get(), names.as_deref(), include_defaults);
     let json = serde_json::to_string_pretty(&bundle).map_err(|e| e.to_string())?;
     json_file(&path)?;
-    std::fs::write(&path, json).map_err(|e| format!("Gagal menyimpan {}: {}", path, e))?;
+    std::fs::write(&path, json).map_err(|e| format!("Failed to save {}: {}", path, e))?;
     Ok(bundle.presets.len())
 }
 
@@ -811,12 +811,12 @@ const MAX_BUNDLE_BYTES: u64 = 50 * 1024 * 1024;
 fn read_bundle(path: &str) -> Result<PresetBundle, String> {
     json_file(path)?;
     let size = std::fs::metadata(path)
-        .map_err(|e| format!("Gagal membaca {}: {}", path, e))?
+        .map_err(|e| format!("Failed to read {}: {}", path, e))?
         .len();
     if size > MAX_BUNDLE_BYTES {
         return Err("Preset file is too large".into());
     }
-    let text = std::fs::read_to_string(path).map_err(|e| format!("Gagal membaca {}: {}", path, e))?;
+    let text = std::fs::read_to_string(path).map_err(|e| format!("Failed to read {}: {}", path, e))?;
     PresetBundle::parse(&text)
 }
 

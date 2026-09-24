@@ -539,17 +539,17 @@ impl PrintSettings {
     pub fn validate(&self) -> Result<(), String> {
         if let Some(c) = self.copies {
             if c == 0 || c > MAX_COPIES {
-                return Err(format!("copies harus 1–{}", MAX_COPIES));
+                return Err(format!("copies must be between 1 and {}", MAX_COPIES));
             }
         }
         if let Some(d) = self.dpi {
             if !(MIN_DPI..=MAX_DPI).contains(&d) {
-                return Err(format!("dpi harus {}–{}", MIN_DPI, MAX_DPI));
+                return Err(format!("dpi must be between {} and {}", MIN_DPI, MAX_DPI));
             }
         }
         for v in [self.offset_x, self.offset_y].into_iter().flatten() {
             if !v.is_finite() || v.abs() > 500.0 {
-                return Err("offset harus antara -500 dan 500 mm".into());
+                return Err("offset must be between -500 and 500 mm".into());
             }
         }
         if let Some(p) = &self.printer {
@@ -598,7 +598,7 @@ impl PrintSettings {
                 .map(|v| match v.to_ascii_lowercase().as_str() {
                     "1" | "true" | "yes" | "on" => Ok(true),
                     "0" | "false" | "no" | "off" => Ok(false),
-                    _ => Err(format!("{}: '{}' harus true/false", key, v)),
+                    _ => Err(format!("{}: '{}' must be true or false", key, v)),
                 })
                 .transpose()
         }
