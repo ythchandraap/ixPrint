@@ -22,6 +22,7 @@ pub struct AppState {
     /// Handle used to stop the local HTTP bridge without stopping the app.
     pub server_handle: std::sync::Mutex<Option<actix_web::dev::ServerHandle>>,
     pub token_usage: crate::auth::TokenUsage,
+    pub in_flight: crate::auth::InFlight,
     /// Clients locked out after repeatedly sending wrong tokens.
     pub failed_auth: crate::auth::FailedAttempts,
     pub history: History,

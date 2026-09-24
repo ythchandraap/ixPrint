@@ -10,6 +10,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 pub const TOKEN_PREFIX: &str = "fxp_";
+pub const MAX_IN_FLIGHT_PER_CLIENT: usize = 8;
 const MAX_NAME: usize = 64;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -158,6 +159,44 @@ impl TokenUsage {
     }
 }
 
+#[derive(Default)]
+pub struct InFlight(Mutex<HashMap<String, usize>>);
+
+impl InFlight {
+    pub fn acquire(&self, key: &str) -> Option<InFlightGuard<'_>> {
+        let mut counts = self.0.lock_safe();
+        let count = counts.entry(key.to_string()).or_default();
+        if *count >= MAX_IN_FLIGHT_PER_CLIENT {
+            return None;
+        }
+        *count += 1;
+        Some(InFlightGuard {
+            in_flight: self,
+            key: key.to_string(),
+        })
+    }
+}
+
+pub struct InFlightGuard<'a> {
+    in_flight: &'a InFlight,
+    key: String,
+}
+
+impl Drop for InFlightGuard<'_> {
+    fn drop(&mut self) {
+        let mut counts = self.in_flight.0.lock_safe();
+        match counts.get(&self.key).copied() {
+            Some(1) => {
+                counts.remove(&self.key);
+            }
+            Some(count) => {
+                counts.insert(self.key.clone(), count - 1);
+            }
+            None => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,5 +239,27 @@ mod tests {
         assert_eq!(extract(Some("Basic xyz"), Some("hdr"), None).as_deref(), Some("hdr"));
         assert_eq!(extract(None, None, Some("q")).as_deref(), Some("q"));
         assert_eq!(extract(None, Some("  "), None), None);
+    }
+
+    #[test]
+    fn limits_in_flight_and_releases_dropped_guard() {
+        let in_flight = InFlight::default();
+        let mut guards: Vec<_> = (0..MAX_IN_FLIGHT_PER_CLIENT)
+            .map(|_| in_flight.acquire("token-id").unwrap())
+            .collect();
+        assert!(in_flight.acquire("token-id").is_none());
+
+        drop(guards.pop());
+        assert!(in_flight.acquire("token-id").is_some());
+    }
+
+    #[test]
+    fn separate_clients_have_separate_limits() {
+        let in_flight = InFlight::default();
+        let _first: Vec<_> = (0..MAX_IN_FLIGHT_PER_CLIENT)
+            .map(|_| in_flight.acquire("token-a").unwrap())
+            .collect();
+        assert!(in_flight.acquire("token-a").is_none());
+        assert!(in_flight.acquire("token-b").is_some());
     }
 }
