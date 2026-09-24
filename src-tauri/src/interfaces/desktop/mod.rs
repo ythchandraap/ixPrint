@@ -122,3 +122,29 @@ pub fn register_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         commands::print::test_print,
     ])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::COMMANDS;
+
+    #[test]
+    fn all_tauri_commands_registered() {
+        let source = include_str!("mod.rs");
+        let handler = source
+            .split_once("tauri::generate_handler![")
+            .expect("generate_handler! registration")
+            .1
+            .split_once("])")
+            .expect("generate_handler! closing delimiter")
+            .0;
+        let registered: Vec<_> = handler
+            .lines()
+            .filter_map(|line| {
+                let path = line.trim().trim_end_matches(',');
+                path.strip_prefix("commands::")?.rsplit("::").next()
+            })
+            .collect();
+
+        assert_eq!(registered, COMMANDS);
+    }
+}
