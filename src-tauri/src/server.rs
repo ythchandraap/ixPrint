@@ -475,17 +475,28 @@ async fn submit(
     }
 }
 
+struct DataSubmission {
+    preset: Option<String>,
+    data: serde_json::Value,
+    header: Option<serde_json::Value>,
+    settings: PrintSettings,
+    callback: (Option<String>, Option<String>),
+}
+
 /// Validates the data part of a JSON print and queues it.
 async fn submit_data(
     req: &HttpRequest,
     state: &State,
     token: Option<auth::ApiToken>,
-    preset: Option<String>,
-    data: serde_json::Value,
-    header: Option<serde_json::Value>,
-    settings: PrintSettings,
-    (callback_url, callback_ref): (Option<String>, Option<String>),
+    submission: DataSubmission,
 ) -> HttpResponse {
+    let DataSubmission {
+        preset,
+        data,
+        header,
+        settings,
+        callback: (callback_url, callback_ref),
+    } = submission;
     let bad = |m: String| error(actix_web::http::StatusCode::BAD_REQUEST, &m);
     let callback = match Callback::from_request(callback_url.as_deref(), callback_ref.as_deref(), token.as_ref()) {
         Ok(c) => c,
@@ -549,11 +560,13 @@ async fn print_template(req: HttpRequest, state: State, body: web::Bytes) -> Htt
         &req,
         &state,
         token,
-        Some(body.template),
-        body.data,
-        body.header,
-        body.settings,
-        callback,
+        DataSubmission {
+            preset: Some(body.template),
+            data: body.data,
+            header: body.header,
+            settings: body.settings,
+            callback,
+        },
     )
     .await
 }
@@ -587,7 +600,7 @@ async fn save_upload(
         let Some(name) = field
             .content_disposition()
             .and_then(|cd| cd.get_filename())
-            .map(|n| sanitize_filename::sanitize(n))
+            .map(sanitize_filename::sanitize)
         else {
             continue; // text field
         };
@@ -670,11 +683,13 @@ async fn print(
             &req,
             &state,
             token,
-            body.preset,
-            body.data,
-            body.header,
-            body.settings,
-            callback,
+            DataSubmission {
+                preset: body.preset,
+                data: body.data,
+                header: body.header,
+                settings: body.settings,
+                callback,
+            },
         )
         .await;
     }

@@ -371,7 +371,7 @@ impl PresetBundle {
         let presets = config
             .presets
             .iter()
-            .filter(|(n, _)| names.map_or(true, |names| names.contains(n)))
+            .filter(|(n, _)| names.is_none_or(|names| names.contains(n)))
             .map(|(n, s)| (n.clone(), s.clone()))
             .collect::<BTreeMap<_, _>>();
         PresetBundle {
@@ -588,8 +588,10 @@ mod tests {
         assert!(!old.require_token);
         assert_eq!(old.allowed_origins, vec!["*"]);
         assert_eq!(old.server_port, DEFAULT_SERVER_PORT);
-        let mut c = Config::default();
-        c.allowed_origins = vec!["https://A.id".into()];
+        let mut c = Config {
+            allowed_origins: vec!["https://A.id".into()],
+            ..Config::default()
+        };
         assert!(c.validate().is_err());
         c.allowed_origins = Vec::new();
         c.server_port = 1023;

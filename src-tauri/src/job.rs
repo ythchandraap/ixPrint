@@ -151,14 +151,16 @@ pub fn run(state: &AppState, req: JobRequest) -> Result<JobResult, JobError> {
                 }
                 return crate::remote::forward(
                     state,
-                    &job_id,
-                    preset_name.as_deref(),
-                    &preset,
-                    &merged,
-                    &req,
-                    &remote,
-                    &printer,
-                    &mut record,
+                    crate::remote::ForwardRequest {
+                        job_id: &job_id,
+                        preset_name: preset_name.as_deref(),
+                        preset: &preset,
+                        merged: &merged,
+                        req: &req,
+                        remote: &remote,
+                        remote_printer: &printer,
+                        record: &mut record,
+                    },
                 );
             }
         }

@@ -287,7 +287,7 @@ impl FromStr for Margins {
     fn from_str(s: &str) -> Result<Self, String> {
         let invalid = || format!("Margins '{}' are invalid (e.g. 5, 5,3 or 5,3,5,3 in mm)", s);
         let v: Vec<f32> = s
-            .split(|c| c == ',' || c == ' ')
+            .split([',', ' '])
             .filter(|p| !p.is_empty())
             .map(|p| parse_length_mm(p).ok_or_else(invalid))
             .collect::<Result<_, _>>()?;

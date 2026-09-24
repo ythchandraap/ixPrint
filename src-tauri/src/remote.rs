@@ -327,9 +327,9 @@ fn read_response<T: DeserializeOwned>(
     }
 }
 
-fn with_auth<'a>(
+fn with_auth(
     request: ureq::RequestBuilder<ureq::typestate::WithBody>,
-    remote: &'a Remote,
+    remote: &Remote,
 ) -> ureq::RequestBuilder<ureq::typestate::WithBody> {
     request
         .header("Authorization", format!("Bearer {}", remote.token))
@@ -547,17 +547,28 @@ pub fn test_page(remote: &Remote, pages: u32, settings: &PrintSettings) -> Resul
     read_response(remote, response)
 }
 
-pub fn forward(
-    state: &AppState,
-    job_id: &str,
-    preset_name: Option<&str>,
-    preset: &Preset,
-    merged: &PrintSettings,
-    req: &JobRequest,
-    remote: &Remote,
-    remote_printer: &str,
-    record: &mut HistoryEntry,
-) -> Result<JobResult, JobError> {
+pub(crate) struct ForwardRequest<'a> {
+    pub(crate) job_id: &'a str,
+    pub(crate) preset_name: Option<&'a str>,
+    pub(crate) preset: &'a Preset,
+    pub(crate) merged: &'a PrintSettings,
+    pub(crate) req: &'a JobRequest,
+    pub(crate) remote: &'a Remote,
+    pub(crate) remote_printer: &'a str,
+    pub(crate) record: &'a mut HistoryEntry,
+}
+
+pub(crate) fn forward(state: &AppState, request: ForwardRequest<'_>) -> Result<JobResult, JobError> {
+    let ForwardRequest {
+        job_id,
+        preset_name,
+        preset,
+        merged,
+        req,
+        remote,
+        remote_printer,
+        record,
+    } = request;
     let mut settings = merged.clone();
     settings.printer = Some(remote_printer.to_string());
     let generated = state.jobs_dir.join(format!("{}-remote.pdf", job_id));
