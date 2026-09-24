@@ -227,6 +227,7 @@ pub fn run() {
             commands::get_config,
             commands::set_default_printer,
             commands::set_default_preset,
+            commands::set_lan_access,
             commands::save_preset,
             commands::delete_preset,
             commands::preview_template,

@@ -116,7 +116,7 @@ const when = (iso: string) => new Date(iso).toLocaleString("en-GB", { dateStyle:
 				Only apps with a valid token can use port {{ config.server_port }}.
 			</p>
 			<p v-else class="warn-text small-text">
-				⚠ Anyone on the network at {{ localIp }}:{{ config.server_port }} can print until this is enabled.
+				⚠ Anyone {{ config.lan_access ? "on the network" : "on this computer" }} at {{ localIp }}:{{ config.server_port }} can print until this is enabled.
 			</p>
 		</div>
 

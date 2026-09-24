@@ -18,6 +18,7 @@ const emit = defineEmits<{
 
 const port = ref("");
 const savingPort = ref(false);
+const savingLanAccess = ref(false);
 watch(
 	() => props.config.server_port,
 	(value) => (port.value = String(value)),
@@ -38,6 +39,22 @@ async function savePort() {
 		emit("notify", errorText(e), true);
 	} finally {
 		savingPort.value = false;
+	}
+}
+
+async function toggleLanAccess(event: Event) {
+	const input = event.target as HTMLInputElement;
+	savingLanAccess.value = true;
+	try {
+		const next = await api.setLanAccess(input.checked);
+		emit("config", next);
+		const message = input.checked ? "LAN access enabled" : "LAN access disabled";
+		emit("notify", props.config.bridge_enabled ? `${message}; the bridge is restarting` : message);
+	} catch (e) {
+		input.checked = props.config.lan_access;
+		emit("notify", errorText(e), true);
+	} finally {
+		savingLanAccess.value = false;
 	}
 }
 
@@ -78,6 +95,13 @@ async function openDataFolder() {
 					</ol>
 					<p class="info-note">Turning the bridge off stops new API requests but keeps the ix.print window open.</p>
 				</SettingInfo>
+			</div>
+			<div class="card stack tight">
+				<label class="row check">
+					<input type="checkbox" :checked="config.lan_access" :disabled="savingLanAccess" @change="toggleLanAccess" />
+					<strong class="grow">Allow other computers on the network</strong>
+				</label>
+				<p class="hint">Turn off to accept requests from this computer only. Printer forwarding from other ix.print computers stops working.</p>
 			</div>
 
 			<fieldset>
@@ -154,7 +178,10 @@ async function openDataFolder() {
 				</SettingInfo>
 			</div>
 			<div class="card stack tight">
-				<p class="hint">From another computer: <code>http://{{ localIp }}:{{ config.server_port }}/docs</code></p>
+				<p class="hint">
+					{{ config.lan_access ? "From another computer:" : "This computer only:" }}
+					<code>http://{{ localIp }}:{{ config.server_port }}/docs</code>
+				</p>
 				<div class="row wrap">
 					<button class="ghost small" @click="emit('docs', false)"><BookOpen :size="14" /> Open documentation</button>
 					<button class="ghost small" @click="emit('docs', true)"><ExternalLink :size="14" /> Open in browser</button>

@@ -120,9 +120,10 @@ async function openDocs(external = false) {
 
 const OS_LABEL: Record<string, string> = { macos: "macOS", windows: "Windows", linux: "Linux" };
 const osLabel = computed(() => OS_LABEL[os.value] ?? os.value);
+const bridgeHost = computed(() => (config.value?.lan_access === false ? "127.0.0.1" : localIp.value || "localhost"));
 const address = computed(() => {
 	const port = config.value?.server_port ?? DEFAULT_PORT;
-	return ipState.value === "ok" ? `${localIp.value}:${port}` : `localhost:${port}`;
+	return `${bridgeHost.value}:${port}`;
 });
 
 function copy(text: string) {
@@ -226,10 +227,11 @@ async function toggleBridge() {
 }
 
 function setConfig(next: Config) {
-	const portChanged = config.value?.server_port !== next.server_port;
+	const bridgeChanged =
+		config.value?.server_port !== next.server_port || config.value?.lan_access !== next.lan_access;
 	config.value = next;
 	refreshPrinters();
-	if (portChanged && next.bridge_enabled) {
+	if (bridgeChanged && next.bridge_enabled) {
 		serverState.value = "loading";
 		serverError.value = "";
 		window.setTimeout(checkServerStatus, 500);
@@ -328,16 +330,16 @@ onBeforeUnmount(() => {
 							{{ !bridgeEnabled ? "BRIDGE OFF" : serverState === "ok" ? "BRIDGE ON" : serverState === "error" ? "BRIDGE FAILED" : "STARTING" }}
 						</button>
 						<span class="sep" aria-hidden="true">/</span>
-						<span v-if="ipState === 'loading'" class="skeleton">LOADING ADDRESS</span>
+						<span v-if="ipState === 'loading' && config?.lan_access !== false" class="skeleton">LOADING ADDRESS</span>
 						<button
 							v-else
 							class="addr"
-							:title="ipState === 'ok' ? 'Copy the address for a web app' : 'Not connected to a network: only accessible from this computer'"
+							:title="config?.lan_access === false ? 'Copy the local bridge address' : ipState === 'ok' ? 'Copy the address for a web app' : 'Not connected to a network: only accessible from this computer'"
 							@click="copy(address)"
 						>
 							{{ address }}<Copy :size="11" />
 						</button>
-						<span v-if="ipState === 'none'" class="warn-note">OFFLINE</span>
+						<span v-if="ipState === 'none' && config?.lan_access !== false" class="warn-note">OFFLINE</span>
 						<template v-if="config">
 							<span class="sep" aria-hidden="true">/</span>
 							<span :class="{ 'warn-note': !config.require_token }">
@@ -381,7 +383,7 @@ onBeforeUnmount(() => {
 			<SettingsView
 				v-if="settingsOpen"
 				:config="config"
-				:local-ip="localIp"
+				:local-ip="bridgeHost"
 				:os="os"
 				@config="setConfig"
 				@notify="notify"
@@ -425,7 +427,7 @@ onBeforeUnmount(() => {
 				:config="config"
 				:printers="printers"
 				:test-pages="testPages"
-				:local-ip="localIp"
+				:local-ip="bridgeHost"
 				:server-port="config.server_port"
 				@config="setConfig"
 				@notify="notify"
