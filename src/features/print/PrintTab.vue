@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ArrowLeft, FileText, Printer, SlidersHorizontal, Upload } from "lucide-vue-next";
-import EmptyState from "@/components/EmptyState.vue";
+import EmptyState from "@/shared/ui/EmptyState.vue";
 import {
 	api,
 	errorText,

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { CircleCheck, ChevronLeft, ChevronRight, History as HistoryIcon, RefreshCw, Webhook } from "lucide-vue-next";
-import EmptyState from "@/components/EmptyState.vue";
-import AutocompleteField from "@/components/AutocompleteField.vue";
+import EmptyState from "@/shared/ui/EmptyState.vue";
+import AutocompleteField from "@/shared/ui/AutocompleteField.vue";
 import { api, errorText, type Config, type HistoryDay, type HistoryEntry, type JobStatus } from "@/shared/api";
 import { CALLBACK_PENDING, describeCallback } from "@/shared/lib/callback";
 import { describeJob, FINAL_STATES } from "@/shared/lib/job";
