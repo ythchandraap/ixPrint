@@ -512,7 +512,7 @@ async fn submit_data(
     };
     let records = match &data {
         serde_json::Value::Array(items) if items.len() > MAX_RECORDS => {
-            return bad(format!("data: maksimal {} data per request", MAX_RECORDS));
+            return bad(format!("data: at most {} items per request", MAX_RECORDS));
         }
         serde_json::Value::Array(items) => items.iter().map(crate::template::record_from_json).collect(),
         other => crate::template::record_from_json(other).map(|r| vec![r]),
@@ -751,7 +751,7 @@ async fn test_page(req: HttpRequest, state: State, query: web::Query<HashMap<Str
         Some(c) => match c.parse::<u32>() {
             Ok(n) if (1..=crate::testpage::MAX_TEST_PAGES).contains(&n) => n,
             _ => {
-                let msg = format!("count harus 1–{}", crate::testpage::MAX_TEST_PAGES);
+                let msg = format!("count must be between 1 and {}", crate::testpage::MAX_TEST_PAGES);
                 return error(actix_web::http::StatusCode::BAD_REQUEST, &msg);
             }
         },

@@ -56,7 +56,7 @@ impl Callback {
         validate_url(url)?;
         let reference = reference.map(str::trim).filter(|r| !r.is_empty());
         if reference.is_some_and(|r| r.chars().count() > MAX_REFERENCE) {
-            return Err(format!("callback_ref maksimal {} karakter", MAX_REFERENCE));
+            return Err(format!("callback_ref must be at most {} characters", MAX_REFERENCE));
         }
         Ok(Some(Callback {
             url: url.to_string(),
@@ -69,7 +69,7 @@ impl Callback {
 fn validate_url(url: &str) -> Result<(), String> {
     let bad = || format!("callback_url is invalid: '{}' (must use http:// or https://)", url);
     if url.len() > MAX_URL {
-        return Err(format!("callback_url maksimal {} karakter", MAX_URL));
+        return Err(format!("callback_url must be at most {} characters", MAX_URL));
     }
     let lower = url.to_ascii_lowercase();
     let rest = lower

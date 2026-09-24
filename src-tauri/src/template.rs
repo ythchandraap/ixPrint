@@ -281,7 +281,7 @@ impl Template {
             }
         }
         if self.elements.len() > MAX_ELEMENTS {
-            return Err(format!("maksimal {} elemen", MAX_ELEMENTS));
+            return Err(format!("At most {} elements are allowed", MAX_ELEMENTS));
         }
         for (i, el) in self.elements.iter().enumerate() {
             el.check().map_err(|e| format!("elemen #{}: {}", i + 1, e))?;
@@ -904,12 +904,12 @@ pub fn render(path: &Path, template: &Template, records: &[Record], header: &Rec
         return Err("Data is empty: send at least one record".into());
     }
     if records.len() > MAX_RECORDS {
-        return Err(format!("maksimal {} record per job", MAX_RECORDS));
+        return Err(format!("at most {} records per job", MAX_RECORDS));
     }
     let pdfium = pdfium()?;
     let doc = build(&pdfium, template, records, header)?;
     doc.save_to_file(path)
-        .map_err(|e| format!("Gagal menyimpan PDF template: {}", e))
+        .map_err(|e| format!("Failed to save template PDF: {}", e))
 }
 
 /// The first `max_pages` printed pages as PNGs, for a print preview.

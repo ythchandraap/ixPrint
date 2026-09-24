@@ -396,7 +396,7 @@ pub fn print(printer: &str, pdf: &Path, sheets: &[Sheet], o: &DeviceOptions) -> 
     args.push(pdf.to_string_lossy().into_owned());
 
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let stdout = run("lp", &arg_refs).map_err(|e| format!("Gagal mengirim ke printer: {}", e))?;
+    let stdout = run("lp", &arg_refs).map_err(|e| format!("Failed to send to printer: {}", e))?;
     // "request id is PRINTER-123 (1 file(s))"
     Ok(stdout
         .split_once("request id is ")
