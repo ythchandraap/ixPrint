@@ -12,7 +12,6 @@ import {
 } from "@/shared/api";
 import { templateFields } from "@/shared/lib/template";
 import AutocompleteField from "@/shared/ui/AutocompleteField.vue";
-import DesignEditor from "@/features/design-editor/DesignEditor.vue";
 
 const props = defineProps<{
 	/** Existing preset name, or undefined for a new preset. */
@@ -314,14 +313,15 @@ async function save() {
 </script>
 
 <template>
-	<DesignEditor
+	<slot
 		v-if="editingDesign"
+		name="design-editor"
 		:preset-name="form.name"
 		:template="design ?? newDesign()"
 		:local-ip="localIp"
 		:server-port="serverPort"
-		@apply="applyDesign"
-		@cancel="editingDesign = false"
+		:apply="applyDesign"
+		:cancel="() => (editingDesign = false)"
 	/>
 	<form v-else class="stack" @submit.prevent="save">
 		<h3 class="section-title">{{ name ? `Edit preset "${name}"` : "New preset" }}</h3>
