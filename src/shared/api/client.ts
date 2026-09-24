@@ -5,5 +5,5 @@ export const isInApp = () => typeof window !== "undefined" && "__TAURI_INTERNALS
 
 /** Tauri rejects with the Rust error string; normalise anything else. */
 export function errorText(e: unknown): string {
-	return typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e);
+  return typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e);
 }
