@@ -10,16 +10,16 @@ import { diagnosticCommands } from "./commands/diagnostics";
 import { printCommands } from "./commands/print";
 
 export const api = {
-	...appCommands,
-	...configCommands,
-	...printerCommands,
-	...printerAdminCommands,
-	...presetCommands,
-	...tokenCommands,
-	...remoteCommands,
-	...historyCommands,
-	...diagnosticCommands,
-	...printCommands,
+  ...appCommands,
+  ...configCommands,
+  ...printerCommands,
+  ...printerAdminCommands,
+  ...presetCommands,
+  ...tokenCommands,
+  ...remoteCommands,
+  ...historyCommands,
+  ...diagnosticCommands,
+  ...printCommands,
 };
 
 export { errorText, isInApp } from "./client";
