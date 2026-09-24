@@ -2,7 +2,7 @@
 import { onMounted, ref } from "vue";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { Pencil, RefreshCw, Trash2, X } from "lucide-vue-next";
-import { api, errorText, type RemoteView } from "../api";
+import { api, errorText, type RemoteView } from "@/shared/api";
 
 const emit = defineEmits<{
 	(e: "notify", message: string, error?: boolean): void;

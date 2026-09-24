@@ -4,7 +4,7 @@ import { BookOpen, ExternalLink, FolderOpen, Network, Server, ShieldCheck } from
 import { api, errorText, type Config } from "../api";
 import ApiTab from "@/features/api-tokens/ApiTab.vue";
 import ErrorLogPanel from "./ErrorLogPanel.vue";
-import RemotesPanel from "./RemotesPanel.vue";
+import RemotesPanel from "@/features/remotes/RemotesPanel.vue";
 import SettingInfo from "./SettingInfo.vue";
 
 const props = defineProps<{ config: Config; localIp: string; os: string }>();
