@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from "vue";
 import { BookOpen, ExternalLink, FolderOpen, Network, Server, ShieldCheck } from "lucide-vue-next";
-import { api, errorText, type Config } from "../api";
+import { api, errorText, type Config } from "@/shared/api";
 import ApiTab from "@/features/api-tokens/ApiTab.vue";
-import ErrorLogPanel from "./ErrorLogPanel.vue";
+import ErrorLogPanel from "@/components/ErrorLogPanel.vue";
 import RemotesPanel from "@/features/remotes/RemotesPanel.vue";
-import SettingInfo from "./SettingInfo.vue";
+import SettingInfo from "@/components/SettingInfo.vue";
 
 const props = defineProps<{ config: Config; localIp: string; os: string }>();
 const emit = defineEmits<{

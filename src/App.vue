@@ -9,9 +9,9 @@ import PresetsTab from "@/features/presets/PresetsTab.vue";
 import HistoryTab from "@/features/history/HistoryTab.vue";
 import PrintTab from "@/features/print/PrintTab.vue";
 import ErrorLogPanel from "./components/ErrorLogPanel.vue";
-import SettingsView from "./components/SettingsView.vue";
+import SettingsView from "@/features/settings/SettingsView.vue";
 import EmptyState from "./components/EmptyState.vue";
-import OnboardingDialog from "./components/OnboardingDialog.vue";
+import OnboardingDialog from "@/features/settings/OnboardingDialog.vue";
 
 /** Product name, in one place so a rename touches a single line. */
 const PRODUCT = "ix.print";
