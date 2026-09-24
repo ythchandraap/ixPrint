@@ -44,7 +44,7 @@ impl AppState {
 pub mod test_support {
     use super::*;
     use crate::application::ports::*;
-    use crate::callback::{Attempt, Callback, Payload};
+    use crate::domain::callback::{Attempt, Callback, Payload};
     use crate::domain::diagnostics::DiagnosticEntry;
     use crate::domain::history::{CallbackStatus, HistoryDay, HistoryEntry, HistoryPage};
     use crate::domain::layout::{LayoutResult, Sheet};

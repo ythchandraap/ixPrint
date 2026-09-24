@@ -83,3 +83,7 @@ fn write_atomic(path: &Path, remotes: &[Remote]) -> Result<(), String> {
     }
     fs::rename(tmp, path).map_err(|e| format!("Failed to save remotes: {}", e))
 }
+
+#[cfg(test)]
+#[path = "remote_store/tests.rs"]
+mod tests;

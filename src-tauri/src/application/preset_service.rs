@@ -10,6 +10,37 @@ pub fn config(state: &AppState) -> Config {
     state.config.get()
 }
 
+pub fn bridge_presets(state: &AppState) -> serde_json::Value {
+    let config = state.config.get();
+    serde_json::json!({
+        "default_printer": config.default_printer,
+        "default_preset": config.default_preset,
+        "presets": config.presets,
+    })
+}
+
+pub fn templates_json(state: &AppState) -> serde_json::Value {
+    let config = state.config.get();
+    serde_json::Value::Array(
+        config
+            .presets
+            .iter()
+            .filter_map(|(name, preset)| {
+                let design = preset.design.as_ref()?;
+                Some(serde_json::json!({
+                    "name": name,
+                    "preset": name,
+                    "width_mm": design.width_mm,
+                    "height_mm": design.height_mm,
+                    "fields": design.fields(),
+                    "auto_fields": design.auto_fields(),
+                    "sample": design.sample,
+                }))
+            })
+            .collect(),
+    )
+}
+
 pub fn set_default_printer(state: &AppState, printer: Option<String>) -> Result<Config, String> {
     state.config.update(&mut |config| {
         config.default_printer = printer.clone().filter(|value| !value.trim().is_empty());

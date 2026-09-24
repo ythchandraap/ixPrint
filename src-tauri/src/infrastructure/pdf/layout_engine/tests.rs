@@ -1,5 +1,6 @@
 use super::*;
-use crate::domain::settings::{Margins, PageRange, PrintSettings};
+use crate::application::job_service::{test_page_info, test_sheet_mm};
+use crate::domain::settings::{pt_to_mm, Margins, Orientation, PageRange, PrintSettings, Scale};
 
 /// Loads the PDFium build for the machine running the tests.
 pub fn init_for_tests() {
@@ -322,5 +323,54 @@ fn page_selection_and_errors() {
     let bogus = dir.join("bogus.pdf");
     std::fs::write(&bogus, b"not a pdf").unwrap();
     assert!(build(&bogus, &dir.join("o2.pdf"), &job(PrintSettings::default()), A4).is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn test_page_frame_lands_on_sheet_edge() {
+    init_for_tests();
+    let state = crate::application::state::test_support::state();
+    let dir = std::env::temp_dir().join(format!("ixprint-tp-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let cases = [
+        (
+            r#"{"paper":"A4","orientation":"landscape","margins":"10","scale":"fit"}"#,
+            (297.0, 210.0),
+        ),
+        (r#"{"paper":"80mm"}"#, (80.0, 80.0)),
+        (r#"{"paper":"100x150mm","orientation":"auto"}"#, (100.0, 150.0)),
+    ];
+    for (i, (json, (ew, eh))) in cases.iter().enumerate() {
+        let s: PrintSettings = serde_json::from_str(json).unwrap();
+        let mut job = JobSettings::resolve(&s, "test".into());
+        let (w, h) = test_sheet_mm(&job, (210.0, 297.0));
+        let src = dir.join(format!("t{}.pdf", i));
+        crate::infrastructure::pdf::test_page::generate(&src, w, h, &test_page_info(&state, &job, None, w, h), 1)
+            .unwrap();
+        job.scale = Scale::None;
+        job.margins = Margins::default();
+        job.orientation = Orientation::Auto;
+        let out = dir.join(format!("o{}.pdf", i));
+        let result = build(&src, &out, &job, (210.0, 297.0)).unwrap();
+        let sheet = result.sheets[0];
+        assert!((pt_to_mm(sheet.width_pt) - ew).abs() < 0.2, "{} width", json);
+        assert!((pt_to_mm(sheet.height_pt) - eh).abs() < 0.2, "{} height", json);
+
+        // Render at 4 px/pt: the outermost pixels on every side must be the black frame.
+        let pdfium = pdfium().unwrap();
+        let doc = pdfium.load_pdf_from_file(&out, None).unwrap();
+        let page = doc.pages().get(0).unwrap();
+        let (pw, ph) = ((sheet.width_pt * 4.0) as i32, (sheet.height_pt * 4.0) as i32);
+        let bmp = page
+            .render_with_config(&PdfRenderConfig::new().set_fixed_size(pw, ph))
+            .unwrap();
+        let px = bmp.as_rgba_bytes();
+        let dark = |x: i32, y: i32| px[((y * pw + x) * 4) as usize] < 80;
+        for (x, y) in [(1, ph / 3), (pw - 2, ph / 3), (pw / 3, 1), (pw / 3, ph - 2)] {
+            assert!(dark(x, y), "{}: frame missing at ({}, {})", json, x, y);
+        }
+        // ...and just inside the frame it is white again.
+        assert!(!dark(12, ph / 3), "{}: frame too thick", json);
+    }
     let _ = std::fs::remove_dir_all(dir);
 }

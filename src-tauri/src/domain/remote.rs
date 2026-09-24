@@ -199,3 +199,77 @@ pub fn settings_query(settings: &PrintSettings) -> Vec<(String, String)> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::settings::{Margins, Paper, PrintSettings, Scale};
+
+    fn remote(name: &str) -> Remote {
+        Remote {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: name.into(),
+            url: "http://pc2.local:18032".into(),
+            token: "fxp_test-token".into(),
+            preset: None,
+            created_at: chrono::Local::now().to_rfc3339(),
+        }
+    }
+
+    #[test]
+    fn normalizes_urls_and_rejects_paths() {
+        assert_eq!(normalize_url("http://192.168.1.7").unwrap(), "http://192.168.1.7:18032");
+        assert_eq!(
+            normalize_url("HTTP://PC2.local:18032/").unwrap(),
+            "http://pc2.local:18032"
+        );
+        assert_eq!(
+            normalize_url("https://print.contoh.id").unwrap(),
+            "https://print.contoh.id"
+        );
+        for value in ["192.168.1.7", "http://a/b", "http://u:p@a", "ftp://a"] {
+            assert!(normalize_url(value).is_err(), "{}", value);
+        }
+    }
+
+    #[test]
+    fn validates_and_resolves_names() {
+        assert!(validate_name("PC2").is_ok());
+        assert!(validate_name("Gudang Lt 2").is_ok());
+        for value in ["", " PC2", "PC2 ", "PC/2", &"x".repeat(33)] {
+            assert!(validate_name(value).is_err(), "{}", value);
+        }
+        let r = remote("PC2");
+        assert_eq!(
+            resolve(&["PC2 / EPSON".into()], std::slice::from_ref(&r), "PC2 / EPSON"),
+            Target::Local("PC2 / EPSON".into())
+        );
+        assert!(
+            matches!(resolve(&[], std::slice::from_ref(&r), "PC2 / EPSON"), Target::Remote { printer, .. } if printer == "EPSON")
+        );
+        assert_eq!(resolve(&[], std::slice::from_ref(&r), "PC2 / "), Target::Unknown);
+        assert_eq!(resolve(&[], std::slice::from_ref(&r), "pc2 / EPSON"), Target::Unknown);
+    }
+
+    #[test]
+    fn settings_round_trip_to_query() {
+        let settings = PrintSettings {
+            copies: Some(2),
+            paper: Some(Paper::Roll { width_mm: 80.0 }),
+            offset_x: Some(1.5),
+            margins: Some(Margins {
+                top: 5.0,
+                right: 3.0,
+                bottom: 5.0,
+                left: 3.0,
+            }),
+            collate: Some(false),
+            scale: Some(Scale::Percent(90.0)),
+            ..Default::default()
+        };
+        let params = settings_query(&settings).into_iter().collect();
+        let (parsed, preset) = PrintSettings::from_query(&params).unwrap();
+        assert_eq!(parsed, settings);
+        assert!(preset.is_none());
+    }
+}
