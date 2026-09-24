@@ -7,6 +7,7 @@ use crate::job::{self, AppState, Document, JobRequest, JobResult};
 use crate::remote::{self, Remote, RemoteView, Target};
 use crate::server::{job_status_json, printer_views, PrinterView};
 use crate::settings::PrintSettings;
+use crate::sync::LockExt;
 use crate::{layout, printer};
 use local_ip_address::local_ip;
 use std::path::PathBuf;
@@ -81,7 +82,7 @@ pub fn server_status(state: AppStateRef<'_>) -> Result<(), String> {
     if !state.config.get().bridge_enabled {
         return Err("The application bridge is disabled".into());
     }
-    match state.server_error.lock().unwrap().clone() {
+    match state.server_error.lock_safe().clone() {
         Some(e) => Err(e),
         None => Ok(()),
     }
@@ -106,14 +107,14 @@ pub async fn set_bridge_enabled_inner(state: Arc<AppState>, enabled: bool) -> Re
     })?;
 
     if enabled {
-        state.server_error.lock().unwrap().take();
-        let running = state.server_handle.lock().unwrap().is_some();
+        state.server_error.lock_safe().take();
+        let running = state.server_handle.lock_safe().is_some();
         if !running {
             crate::server::spawn(state.clone());
         }
     } else {
-        let handle = state.server_handle.lock().unwrap().take();
-        state.server_error.lock().unwrap().take();
+        let handle = state.server_handle.lock_safe().take();
+        state.server_error.lock_safe().take();
         if let Some(handle) = handle {
             handle.stop(true).await;
         }
@@ -136,8 +137,8 @@ pub async fn set_server_port(state: AppStateRef<'_>, port: u16) -> Result<Config
     })?;
 
     if next.bridge_enabled {
-        let handle = state.server_handle.lock().unwrap().take();
-        state.server_error.lock().unwrap().take();
+        let handle = state.server_handle.lock_safe().take();
+        state.server_error.lock_safe().take();
         if let Some(handle) = handle {
             handle.stop(true).await;
         }
@@ -267,7 +268,7 @@ pub fn remote_remove(state: AppStateRef<'_>, id: String) -> Result<Vec<RemoteVie
         list.retain(|r| r.id != id);
         Ok(())
     })?;
-    state.remote_cache.lock().unwrap().remove(&id);
+    state.remote_cache.lock_safe().remove(&id);
     state.config.update(|config| {
         if config
             .default_printer

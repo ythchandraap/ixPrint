@@ -6,6 +6,7 @@
 //! Source pages are embedded as form XObjects, so text and vector graphics stay vector.
 
 use crate::settings::{mm_to_pt, Align, JobSettings, Orientation, Paper, Scale};
+use crate::sync::LockExt;
 use pdfium_render::prelude::*;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -62,7 +63,7 @@ pub fn pdfium() -> Result<PdfiumGuard, String> {
         None => return Err("PDFium has not been initialised".into()),
     };
     // A panic elsewhere doesn't leave PDFium in a bad state; keep going.
-    let lock = PDFIUM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let lock = PDFIUM_LOCK.lock_safe();
     Ok(PdfiumGuard { _lock: lock, pdfium })
 }
 

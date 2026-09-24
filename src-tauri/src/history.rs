@@ -4,6 +4,7 @@
 //! to the same day file as separate `{"callback_for": id, …}` lines; the latest
 //! one is merged into the entry when reading.
 
+use crate::sync::LockExt;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -149,7 +150,7 @@ impl History {
     }
 
     fn append_line(&self, date: &str, line: &str) -> Result<(), String> {
-        let _guard = self.lock.lock().unwrap();
+        let _guard = self.lock.lock_safe();
         fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
         let mut file = OpenOptions::new()
             .create(true)
@@ -164,7 +165,7 @@ impl History {
         if !is_date(date) {
             return Err(format!("Date '{}' is invalid (YYYY-MM-DD)", date));
         }
-        let _guard = self.lock.lock().unwrap();
+        let _guard = self.lock.lock_safe();
         let text = match fs::read_to_string(self.day_file(date)) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
@@ -252,7 +253,7 @@ impl History {
         let cutoff = (chrono::Local::now().date_naive() - chrono::Duration::days(retention_days as i64))
             .format("%Y-%m-%d")
             .to_string();
-        let _guard = self.lock.lock().unwrap();
+        let _guard = self.lock.lock_safe();
         for (date, path) in self.day_files() {
             if date < cutoff {
                 let _ = fs::remove_file(path);

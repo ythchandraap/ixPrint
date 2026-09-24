@@ -1,5 +1,6 @@
 //! Durable, user-visible diagnostics for errors and abnormal process exits.
 
+use crate::sync::LockExt;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -118,7 +119,7 @@ impl Diagnostics {
     }
 
     pub fn record(&self, level: &str, source: &str, message: &str, details: Option<&str>) -> Result<(), String> {
-        let _guard = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = self.lock.lock_safe();
         let entry = DiagnosticEntry {
             time: chrono::Local::now().to_rfc3339(),
             level: truncate(level, 24),
@@ -138,7 +139,7 @@ impl Diagnostics {
     }
 
     pub fn read(&self) -> Result<Vec<DiagnosticEntry>, String> {
-        let _guard = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = self.lock.lock_safe();
         let mut entries: Vec<DiagnosticEntry> = Vec::new();
         for path in [self.path.with_extension("jsonl.1"), self.path.clone()] {
             let text = match fs::read_to_string(path) {
@@ -156,7 +157,7 @@ impl Diagnostics {
     }
 
     pub fn clear(&self) -> Result<(), String> {
-        let _guard = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = self.lock.lock_safe();
         for path in [self.path.clone(), self.path.with_extension("jsonl.1")] {
             match fs::remove_file(path) {
                 Ok(()) => {}
