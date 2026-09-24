@@ -16,7 +16,7 @@ use windows::Win32::Graphics::Gdi::{
     DM_COPIES, DM_DEFAULTSOURCE, DM_DUPLEX, DM_ORIENTATION, DM_PAPERLENGTH, DM_PAPERSIZE, DM_PAPERWIDTH, HALFTONE, HDC,
     LOGPIXELSX, LOGPIXELSY, PHYSICALOFFSETX, PHYSICALOFFSETY, SRCCOPY,
 };
-use windows::Win32::Graphics::Printing::{AbortDoc, EndDoc, EndPage, StartDocW, StartPage, DOCINFOW};
+use windows::Win32::Storage::Xps::{AbortDoc, EndDoc, EndPage, StartDocW, StartPage, DOCINFOW};
 
 const DEFAULT_MAX_DPI: u32 = 300;
 
