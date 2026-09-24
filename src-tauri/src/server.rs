@@ -4,11 +4,11 @@
 //! changed from the ix.print window, because this port is open to the network.
 
 use crate::application::ports::ServerControl;
+use crate::application::printer_service::{PrinterLookupError, PrinterView};
 use crate::auth;
 use crate::callback::{self, Callback};
 use crate::config::PresetBundle;
 use crate::job::{self, AppState, Document, JobError, JobRequest};
-use crate::printer;
 use crate::settings::PrintSettings;
 use crate::sync::LockExt;
 use actix_cors::Cors;
@@ -147,51 +147,8 @@ macro_rules! authorized {
     };
 }
 
-/// A printer as reported to clients; `is_default` is the printer ix.print uses
-/// when nothing else is specified.
-#[derive(Serialize)]
-pub struct PrinterView {
-    #[serde(flatten)]
-    pub printer: printer::Printer,
-    pub is_default: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub remote: Option<String>,
-}
-
 pub fn printer_views(state: &AppState, include_remote: bool) -> Vec<PrinterView> {
-    let default = state.default_printer();
-    let mut views: Vec<PrinterView> = printer::list_printers()
-        .into_iter()
-        .map(|p| PrinterView {
-            is_default: default.as_deref() == Some(p.name.as_str()),
-            printer: p,
-            remote: None,
-        })
-        .collect();
-    if include_remote {
-        let remotes = state.remotes.list();
-        let remote_views = std::thread::scope(|scope| {
-            remotes
-                .iter()
-                .map(|remote| scope.spawn(|| crate::remote::printers(state, remote).0))
-                .collect::<Vec<_>>()
-                .into_iter()
-                .flat_map(|handle| handle.join().unwrap_or_default())
-                .map(|printer| PrinterView {
-                    is_default: default.as_deref() == Some(printer.name.as_str()),
-                    remote: remotes.iter().find_map(|r| {
-                        printer
-                            .name
-                            .strip_prefix(&format!("{}{}", r.name, crate::remote::SEPARATOR))
-                            .map(|_| r.name.clone())
-                    }),
-                    printer,
-                })
-                .collect::<Vec<_>>()
-        });
-        views.extend(remote_views);
-    }
-    views
+    crate::application::printer_service::printer_views(state, include_remote)
 }
 
 async fn hello() -> impl Responder {
@@ -231,12 +188,9 @@ async fn list_printers(req: HttpRequest, state: State) -> HttpResponse {
     }
 }
 
-enum LookupError {
-    NotFound(String),
-    Remote(crate::remote::RemoteError),
-}
+type LookupError = PrinterLookupError;
 
-fn remote_error_response(remote_error: crate::remote::RemoteError) -> HttpResponse {
+fn remote_error_response(remote_error: crate::domain::remote::RemoteError) -> HttpResponse {
     let status = if remote_error.is_bad_request() {
         actix_web::http::StatusCode::BAD_REQUEST
     } else {
@@ -256,26 +210,7 @@ async fn capabilities(req: HttpRequest, state: State, query: web::Query<HashMap<
             "parameter 'printer' is required",
         );
     };
-    match web::block(move || {
-        let local_names = printer::list_printers().into_iter().map(|p| p.name).collect::<Vec<_>>();
-        match crate::remote::resolve(&local_names, &state.remotes.list(), &name) {
-            crate::remote::Target::Local(name) => printer::capabilities(&name).map_err(LookupError::NotFound),
-            crate::remote::Target::Unknown => Err(LookupError::NotFound(format!(
-                "Printer '{}' was not found on this computer",
-                name
-            ))),
-            crate::remote::Target::Remote { .. } if hop => {
-                Err(LookupError::Remote(crate::remote::RemoteError::BadRequest(
-                    "Forwarding between ix.print computers is limited to one hop".into(),
-                )))
-            }
-            crate::remote::Target::Remote { remote, printer } => {
-                crate::remote::capabilities(&remote, &printer).map_err(LookupError::Remote)
-            }
-        }
-    })
-    .await
-    {
+    match web::block(move || crate::application::printer_service::capabilities(&state, &name, hop)).await {
         Ok(Ok(caps)) => HttpResponse::Ok().json(caps),
         Ok(Err(LookupError::NotFound(e))) => error(actix_web::http::StatusCode::NOT_FOUND, &e),
         Ok(Err(LookupError::Remote(e))) => remote_error_response(e),
@@ -294,28 +229,7 @@ async fn queue(req: HttpRequest, state: State, query: web::Query<HashMap<String,
             "parameter 'printer' is required",
         );
     };
-    match web::block(move || {
-        let local_names = printer::list_printers().into_iter().map(|p| p.name).collect::<Vec<_>>();
-        match crate::remote::resolve(&local_names, &state.remotes.list(), &name) {
-            crate::remote::Target::Local(name) => printer::queue(&name).map_err(LookupError::NotFound),
-            crate::remote::Target::Unknown => Err(LookupError::NotFound(format!(
-                "Printer '{}' was not found on this computer",
-                name
-            ))),
-            crate::remote::Target::Remote { .. } if hop => {
-                Err(LookupError::Remote(crate::remote::RemoteError::BadRequest(
-                    "Forwarding between ix.print computers is limited to one hop".into(),
-                )))
-            }
-            crate::remote::Target::Remote { remote, printer } => {
-                let mut queue = crate::remote::queue(&remote, &printer).map_err(LookupError::Remote)?;
-                queue.printer = name.clone();
-                Ok(queue)
-            }
-        }
-    })
-    .await
-    {
+    match web::block(move || crate::application::printer_service::queue(&state, &name, hop)).await {
         Ok(Ok(q)) => HttpResponse::Ok().json(q),
         Ok(Err(LookupError::NotFound(e))) => error(actix_web::http::StatusCode::NOT_FOUND, &e),
         Ok(Err(LookupError::Remote(e))) => remote_error_response(e),
@@ -326,48 +240,7 @@ async fn queue(req: HttpRequest, state: State, query: web::Query<HashMap<String,
 /// Status of a job printed through ix.print: failed in ix.print, queued (with
 /// position), printing, blocked by a printer error, or completed.
 pub fn job_status_json(state: &AppState, job_id: &str) -> Option<serde_json::Value> {
-    let entry = state.history.find(job_id)?;
-    let base = serde_json::json!({
-        "job_id": entry.id,
-        "printer": entry.printer,
-        "spooler_job": entry.spooler_job,
-    });
-    let status = if !entry.success {
-        serde_json::json!({ "state": "failed", "message": entry.error })
-    } else if let Some(remote_job) = &entry.remote {
-        let mut status = match state.remotes.list().into_iter().find(|r| r.id == remote_job.remote_id) {
-            Some(remote) => match crate::remote::job_status(&remote, &remote_job.job_id) {
-                Ok(status) => status,
-                Err(error) => {
-                    serde_json::json!({ "state": "unknown", "message": error.to_string(), "remote_unreachable": true })
-                }
-            },
-            None => {
-                serde_json::json!({ "state": "unknown", "message": format!("Remote '{}' was removed", remote_job.remote_name) })
-            }
-        };
-        if let Some(object) = status.as_object_mut() {
-            object.insert("job_id".into(), serde_json::json!(entry.id));
-            object.insert("printer".into(), serde_json::json!(entry.printer));
-            object.insert("remote".into(), serde_json::json!(remote_job.remote_name));
-        }
-        status
-    } else {
-        match entry
-            .spooler_job
-            .as_deref()
-            .map(|id| printer::job_status(&entry.printer, id))
-        {
-            Some(Ok(s)) => serde_json::to_value(s).unwrap_or_default(),
-            Some(Err(e)) => serde_json::json!({ "state": "unknown", "message": e }),
-            None => serde_json::json!({ "state": "unknown" }),
-        }
-    };
-    let mut merged = base;
-    if let (Some(m), Some(s)) = (merged.as_object_mut(), status.as_object()) {
-        m.extend(s.clone());
-    }
-    Some(merged)
+    crate::application::printer_service::job_status_json(state, job_id)
 }
 
 async fn job_status(req: HttpRequest, state: State, query: web::Query<HashMap<String, String>>) -> HttpResponse {

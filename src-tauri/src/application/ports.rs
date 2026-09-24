@@ -73,6 +73,7 @@ pub trait PrinterAdmin: Send + Sync {
 }
 
 pub trait PdfEngine: Send + Sync {
+    fn engine_status(&self) -> Result<(), String>;
     fn build_layout(
         &self,
         source: &Path,
@@ -98,6 +99,7 @@ pub trait PdfEngine: Send + Sync {
     fn preview_png(&self, template: &Template, record: &Record, px_per_mm: f32) -> Result<Vec<u8>, String>;
     fn render_page_png(&self, path: &Path, page: usize, px_per_mm: f32) -> Result<Vec<u8>, String>;
     fn test_page(&self, path: &Path, width_mm: f32, height_mm: f32, info: &[String], pages: u32) -> Result<(), String>;
+    fn remove_generated_file(&self, path: &Path);
 }
 
 pub trait RemoteGateway: Send + Sync {

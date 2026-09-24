@@ -14,6 +14,10 @@ use std::path::Path;
 pub struct PdfEngineAdapter;
 
 impl PdfEngine for PdfEngineAdapter {
+    fn engine_status(&self) -> Result<(), String> {
+        layout_engine::pdfium().map(|_| ())
+    }
+
     fn build_layout(
         &self,
         source: &Path,
@@ -59,5 +63,9 @@ impl PdfEngine for PdfEngineAdapter {
 
     fn test_page(&self, path: &Path, width_mm: f32, height_mm: f32, info: &[String], pages: u32) -> Result<(), String> {
         test_page::generate(path, width_mm, height_mm, info, pages)
+    }
+
+    fn remove_generated_file(&self, path: &Path) {
+        let _ = std::fs::remove_file(path);
     }
 }

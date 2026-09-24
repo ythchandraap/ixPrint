@@ -7,23 +7,16 @@
 //! Redirects are never followed, so a callback can't be bounced elsewhere.
 
 use crate::auth::ApiToken;
-use crate::history::CallbackStatus;
-use crate::job::{AppState, JobResult};
 use hmac::{Hmac, Mac};
 use serde::Serialize;
 use sha2::Sha256;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+#[cfg(test)]
+use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 const MAX_URL: usize = 2048;
 const MAX_REFERENCE: usize = 200;
-/// Jobs watched at once; each polls the spooler until its job is done.
-const MAX_ACTIVE: usize = 200;
-const POLL_EVERY: Duration = Duration::from_secs(3);
-/// A job still not done after this is reported as `timeout`.
-const GIVE_UP_AFTER: Duration = Duration::from_secs(60 * 60);
 /// Pause before each delivery attempt; 2xx ends it.
 const RETRY_DELAYS: [Duration; 4] = [
     Duration::ZERO,
@@ -32,14 +25,13 @@ const RETRY_DELAYS: [Duration; 4] = [
     Duration::from_secs(120),
 ];
 
-static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 #[cfg(test)]
 static ALLOW_LOOPBACK_FOR_TESTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Where and how to report one job.
 pub struct Callback {
-    url: String,
-    reference: Option<String>,
+    pub(crate) url: String,
+    pub(crate) reference: Option<String>,
     /// HMAC key: the token's stored hash (the client computes it from its token).
     key: String,
 }
@@ -170,131 +162,11 @@ pub struct Payload {
     pub time: String,
 }
 
+#[cfg(test)]
+pub(crate) use crate::application::callback_service::should_mark_sent;
 /// Follows the job in a background thread and reports its outcome.
 /// Refused when too many jobs are being watched already.
-pub fn watch(state: Arc<AppState>, job: &JobResult, callback: Callback) -> Result<(), String> {
-    let record = {
-        let (state, job_id, url, reference) = (
-            state.clone(),
-            job.job_id.clone(),
-            callback.url.clone(),
-            callback.reference.clone(),
-        );
-        move |status: &str, result: Option<&str>, attempts: u32, outcome: Option<&Attempt>| {
-            let (http_status, error) = match outcome {
-                Some(Attempt::Delivered(code)) => (Some(*code), None),
-                Some(Attempt::Failed { status, error }) => (*status, Some(error.clone())),
-                None => (None, None),
-            };
-            let entry = CallbackStatus {
-                url: url.clone(),
-                reference: reference.clone(),
-                state: status.to_string(),
-                result: result.map(str::to_string),
-                attempts,
-                http_status,
-                error,
-                time: chrono::Local::now().to_rfc3339(),
-            };
-            if let Err(e) = state.history.append_callback(&job_id, entry) {
-                eprintln!("[ix.print] callback status was not recorded in history: {}", e);
-            }
-        }
-    };
-    if ACTIVE.fetch_add(1, Ordering::SeqCst) >= MAX_ACTIVE {
-        ACTIVE.fetch_sub(1, Ordering::SeqCst);
-        let message = "too many callbacks are currently waiting".to_string();
-        record(
-            "refused",
-            None,
-            0,
-            Some(&Attempt::Failed {
-                status: None,
-                error: message.clone(),
-            }),
-        );
-        return Err(message);
-    }
-    record("watching", None, 0, None);
-    let (job_id, printer, preset, sheets) = (job.job_id.clone(), job.printer.clone(), job.preset.clone(), job.sheets);
-    let reference = callback.reference.clone();
-    let callback = Arc::new(callback);
-    std::thread::spawn(move || {
-        let payload = |event, success, state: &str, message: Option<String>| Payload {
-            event,
-            job_id: job_id.clone(),
-            reference: reference.clone(),
-            success,
-            state: state.to_string(),
-            message,
-            printer: printer.clone(),
-            preset: preset.clone(),
-            sheets,
-            time: chrono::Local::now().to_rfc3339(),
-        };
-        let started = Instant::now();
-        let mut problem_sent = false;
-        let finished = loop {
-            let status = crate::server::job_status_json(&state, &job_id).unwrap_or_default();
-            let text = |key: &str| status.get(key).and_then(|v| v.as_str()).map(str::to_string);
-            let message = text("message").or_else(|| text("printer_message"));
-            match text("state").as_deref().unwrap_or("unknown") {
-                "completed" => break payload("job.finished", Some(true), "completed", None),
-                "failed" => break payload("job.finished", Some(false), "failed", message),
-                "gone" => {
-                    break payload(
-                        "job.finished",
-                        Some(false),
-                        "gone",
-                        Some("Job left the queue without completing (it may have been cancelled)".into()),
-                    )
-                }
-                // Spoolers that give no job reference: handed over is all we can know.
-                "unknown" if should_mark_sent(&status) => {
-                    break payload(
-                        "job.finished",
-                        Some(true),
-                        "sent",
-                        Some("Sent to the printer; the spooler did not report the job status".into()),
-                    )
-                }
-                "error" if !problem_sent => {
-                    problem_sent = true;
-                    let p = payload("job.problem", None, "error", message);
-                    let cb = callback.clone();
-                    std::thread::spawn(move || deliver(&cb, &p, |_, _, _| {}));
-                }
-                _ => {}
-            }
-            if started.elapsed() > GIVE_UP_AFTER {
-                let last = text("state").unwrap_or_else(|| "unknown".into());
-                break payload(
-                    "job.finished",
-                    Some(false),
-                    "timeout",
-                    Some(format!(
-                        "Belum selesai setelah {} menit (status terakhir: {})",
-                        GIVE_UP_AFTER.as_secs() / 60,
-                        last
-                    )),
-                );
-            }
-            std::thread::sleep(POLL_EVERY);
-        };
-        let result = finished.state.clone();
-        deliver(&callback, &finished, |status, attempts, outcome| {
-            record(status, Some(&result), attempts, Some(outcome))
-        });
-        ACTIVE.fetch_sub(1, Ordering::SeqCst);
-    });
-    Ok(())
-}
-
-fn should_mark_sent(status: &serde_json::Value) -> bool {
-    status.get("remote").is_none()
-        && status.get("state").and_then(|v| v.as_str()) == Some("unknown")
-        && status.get("spooler_job").is_some_and(|v| v.is_null())
-}
+pub use crate::application::callback_service::watch;
 
 /// `sha256=<hex>` over `"{timestamp}.{body}"`.
 pub fn signature(key: &str, timestamp: i64, body: &[u8]) -> String {
@@ -401,6 +273,8 @@ pub(crate) fn deliver_with(callback: &Callback, payload: &Payload, progress: &mu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::job::JobResult;
+    use std::sync::Arc;
 
     static LOOPBACK_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -512,7 +386,10 @@ mod tests {
     #[test]
     fn delivers_signed_result_of_failed_job() {
         let _lock = LOOPBACK_TEST_LOCK.lock().unwrap();
-        let state = crate::application::state::test_support::state();
+        let mut state = Arc::try_unwrap(crate::application::state::test_support::state())
+            .ok()
+            .unwrap();
+        state.callback_sender = Arc::new(crate::infrastructure::net::callback_client::CallbackClient);
         let job = JobResult {
             job_id: "job-1".into(),
             printer: "EPSON".into(),
@@ -555,7 +432,7 @@ mod tests {
         let history = state.history.clone();
         ALLOW_LOOPBACK_FOR_TESTS.store(true, Ordering::SeqCst);
         let _loopback_override = LoopbackTestOverride;
-        watch(state, &job, cb).unwrap();
+        watch(Arc::new(state), &job, cb).unwrap();
         let (head, body) = receive(listener);
 
         let json: serde_json::Value = serde_json::from_str(&body).unwrap();

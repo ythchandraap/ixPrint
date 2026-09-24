@@ -12,7 +12,7 @@ use std::path::Path;
 /// Longest ruler, in mm from the edge.
 const RULER_MM: f32 = 15.0;
 
-pub const MAX_TEST_PAGES: u32 = 50;
+pub const MAX_TEST_PAGES: u32 = crate::domain::job::MAX_TEST_PAGES;
 
 /// Writes a calibration PDF of `pages` pages, each `width_mm` × `height_mm`.
 /// `info` lines (paper, printer, preset, ...) are printed under the title; with

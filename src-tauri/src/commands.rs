@@ -1,14 +1,13 @@
 //! Commands called by the ix.print window. Anything that touches printers runs
 //! on a worker thread so the window stays responsive.
 
+use crate::application::printer_service::PrinterView;
+use crate::application::token_service::CreatedToken;
 use crate::config::{self, Config, ImportOptions, ImportPreview, PresetBundle};
+use crate::domain::remote::RemoteView;
 use crate::history::{HistoryDay, HistoryPage};
 use crate::job::{self, AppState, Document, JobRequest, JobResult};
-use crate::remote::{self, Remote, RemoteView, Target};
-use crate::server::{job_status_json, printer_views, PrinterView};
 use crate::settings::PrintSettings;
-use crate::sync::LockExt;
-use crate::{layout, printer};
 use local_ip_address::local_ip;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -162,34 +161,9 @@ pub async fn set_lan_access(state: AppStateRef<'_>, enabled: bool) -> Result<Con
     Ok(next)
 }
 
-fn remote_from_form(
-    name: String,
-    url: String,
-    token: String,
-    preset: Option<String>,
-    existing: Option<&Remote>,
-) -> Result<Remote, String> {
-    remote::validate_name(&name)?;
-    let url = remote::normalize_url(&url)?;
-    let token = token.trim().to_string();
-    remote::validate_token(&token)?;
-    Ok(Remote {
-        id: existing
-            .map(|r| r.id.clone())
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
-        name,
-        url,
-        token,
-        preset: preset.filter(|p| !p.trim().is_empty()).map(|p| p.trim().to_string()),
-        created_at: existing
-            .map(|r| r.created_at.clone())
-            .unwrap_or_else(|| chrono::Local::now().to_rfc3339()),
-    })
-}
-
 #[tauri::command]
 pub fn remote_list(state: AppStateRef<'_>) -> Vec<RemoteView> {
-    remote::views_from_list(&state.remotes.list(), &state.remote_cache)
+    crate::application::remote_service::list(&state)
 }
 
 #[tauri::command]
@@ -200,22 +174,9 @@ pub async fn remote_add(
     token: String,
     preset: Option<String>,
 ) -> Result<Vec<RemoteView>, String> {
-    let remote = remote_from_form(name, url, token, preset, None)?;
     let state = state.inner().clone();
-    let tested = remote.clone();
-    let io_state = state.clone();
-    let (_, error) = blocking(move || remote::refresh_printers(&io_state, &tested, true)).await?;
-    if let Some(error) = error {
-        return Err(error);
-    }
-    state.remotes.update(&mut |list| {
-        if list.iter().any(|r| r.name.eq_ignore_ascii_case(&remote.name)) {
-            return Err(format!("Remote name '{}' is already used", remote.name));
-        }
-        list.push(remote.clone());
-        Ok(())
-    })?;
-    Ok(remote::views_from_list(&state.remotes.list(), &state.remote_cache))
+    let remote = crate::application::remote_service::build_remote(&state, name, url, token, preset, None)?;
+    blocking(move || crate::application::remote_service::add(&state, remote)).await?
 }
 
 #[tauri::command]
@@ -228,134 +189,58 @@ pub async fn remote_update(
     preset: Option<String>,
 ) -> Result<Vec<RemoteView>, String> {
     let state = state.inner().clone();
-    let old = state
-        .remotes
-        .list()
-        .into_iter()
-        .find(|r| r.id == id)
-        .ok_or("Remote computer was not found")?;
-    let remote = remote_from_form(name, url, token.unwrap_or(old.token.clone()), preset, Some(&old))?;
-    let tested = remote.clone();
-    let io_state = state.clone();
-    let (_, error) = blocking(move || remote::refresh_printers(&io_state, &tested, true)).await?;
-    if let Some(error) = error {
-        return Err(error);
-    }
-    state.remotes.update(&mut |list| {
-        let item = list
-            .iter_mut()
-            .find(|r| r.id == id)
-            .ok_or("Remote computer was not found")?;
-        *item = remote.clone();
-        Ok(())
-    })?;
-    if old.name != remote.name {
-        let old_prefix = format!("{}{}", old.name, remote::SEPARATOR);
-        let new_prefix = format!("{}{}", remote.name, remote::SEPARATOR);
-        state.config.update(&mut |config| {
-            let rename = |value: &mut Option<String>| {
-                if let Some(value) = value.as_mut() {
-                    if let Some(rest) = value.strip_prefix(&old_prefix) {
-                        *value = format!("{}{}", new_prefix, rest);
-                    }
-                }
-            };
-            rename(&mut config.default_printer);
-            config
-                .presets
-                .values_mut()
-                .for_each(|p| rename(&mut p.settings.printer));
-            Ok(())
-        })?;
-    }
-    Ok(remote::views_from_list(&state.remotes.list(), &state.remote_cache))
+    blocking(move || crate::application::remote_service::update(&state, &id, name, url, token, preset)).await?
 }
 
 #[tauri::command]
 pub fn remote_remove(state: AppStateRef<'_>, id: String) -> Result<Vec<RemoteView>, String> {
-    let remote = state
-        .remotes
-        .list()
-        .into_iter()
-        .find(|r| r.id == id)
-        .ok_or("Remote computer was not found")?;
-    state.remotes.update(&mut |list| {
-        list.retain(|r| r.id != id);
-        Ok(())
-    })?;
-    state.remote_cache.lock_safe().remove(&id);
-    state.config.update(&mut |config| {
-        if config
-            .default_printer
-            .as_deref()
-            .is_some_and(|p| p == remote.name || p.starts_with(&format!("{}{}", remote.name, remote::SEPARATOR)))
-        {
-            config.default_printer = None;
-        }
-        Ok(())
-    })?;
-    Ok(remote::views_from_list(&state.remotes.list(), &state.remote_cache))
+    crate::application::remote_service::remove(&state, &id)
 }
 
 #[tauri::command]
 pub async fn remote_test(state: AppStateRef<'_>, id: String) -> Result<RemoteView, String> {
     let state = state.inner().clone();
-    let remote = state
-        .remotes
-        .list()
-        .into_iter()
-        .find(|r| r.id == id)
-        .ok_or("Remote computer was not found")?;
-    blocking(move || {
-        remote::refresh_printers(&state, &remote, true);
-        remote::view(&remote, &state.remote_cache)
-    })
-    .await
+    blocking(move || crate::application::remote_service::test(&state, &id)).await?
 }
 
 /// `Err` with the reason when PDFium could not be loaded.
 #[tauri::command]
-pub fn engine_status() -> Result<(), String> {
-    layout::pdfium().map(|_| ())
+pub fn engine_status(state: AppStateRef<'_>) -> Result<(), String> {
+    crate::application::printer_service::engine_status(&state)
 }
 
 #[tauri::command]
 pub async fn get_printers(state: AppStateRef<'_>) -> Result<Vec<PrinterView>, String> {
     let state = state.inner().clone();
-    blocking(move || printer_views(&state, true)).await
+    blocking(move || crate::application::printer_service::printer_views(&state, true)).await
 }
 
 #[tauri::command]
-pub async fn get_capabilities(state: AppStateRef<'_>, printer: String) -> Result<printer::Capabilities, String> {
+pub async fn get_capabilities(
+    state: AppStateRef<'_>,
+    printer: String,
+) -> Result<crate::domain::printer::Capabilities, String> {
     let state = state.inner().clone();
     blocking(move || {
-        let local = printer::list_printers().into_iter().map(|p| p.name).collect::<Vec<_>>();
-        match remote::resolve(&local, &state.remotes.list(), &printer) {
-            Target::Local(name) => printer::capabilities(&name),
-            Target::Unknown => Err(format!("Printer '{}' was not found on this computer", printer)),
-            Target::Remote { remote, printer } => remote::capabilities(&remote, &printer).map_err(|e| e.to_string()),
-        }
+        crate::application::printer_service::capabilities(&state, &printer, false).map_err(|error| match error {
+            crate::application::printer_service::PrinterLookupError::NotFound(message) => message,
+            crate::application::printer_service::PrinterLookupError::Remote(error) => error.to_string(),
+        })
     })
     .await?
 }
 
 #[tauri::command]
-pub async fn get_queue(state: AppStateRef<'_>, printer: String) -> Result<printer::PrinterQueue, String> {
+pub async fn get_queue(
+    state: AppStateRef<'_>,
+    printer: String,
+) -> Result<crate::domain::printer::PrinterQueue, String> {
     let state = state.inner().clone();
     blocking(move || {
-        let local = printer::list_printers().into_iter().map(|p| p.name).collect::<Vec<_>>();
-        match remote::resolve(&local, &state.remotes.list(), &printer) {
-            Target::Local(name) => printer::queue(&name),
-            Target::Unknown => Err(format!("Printer '{}' was not found on this computer", printer)),
-            Target::Remote {
-                remote,
-                printer: remote_printer,
-            } => {
-                let mut queue = remote::queue(&remote, &remote_printer).map_err(|e| e.to_string())?;
-                queue.printer = printer;
-                Ok(queue)
-            }
-        }
+        crate::application::printer_service::queue(&state, &printer, false).map_err(|error| match error {
+            crate::application::printer_service::PrinterLookupError::NotFound(message) => message,
+            crate::application::printer_service::PrinterLookupError::Remote(error) => error.to_string(),
+        })
     })
     .await?
 }
@@ -364,7 +249,7 @@ pub async fn get_queue(state: AppStateRef<'_>, printer: String) -> Result<printe
 #[tauri::command]
 pub async fn job_status(state: AppStateRef<'_>, job_id: String) -> Result<serde_json::Value, String> {
     let state = state.inner().clone();
-    blocking(move || job_status_json(&state, &job_id))
+    blocking(move || crate::application::printer_service::job_status_json(&state, &job_id))
         .await?
         .ok_or_else(|| "Job not found".to_string())
 }
@@ -492,83 +377,45 @@ pub async fn preview_pdf_sheet(
     settings: PrintSettings,
 ) -> Result<String, String> {
     let state = state.inner().clone();
-    blocking(move || render_pdf_sheet_preview(&state, &pdf_path, preset, settings)).await?
-}
-
-fn render_pdf_sheet_preview(
-    state: &AppState,
-    pdf_path: &str,
-    preset: Option<String>,
-    settings: PrintSettings,
-) -> Result<String, String> {
-    use base64::Engine;
-
-    let path = PathBuf::from(pdf_path);
-    if !path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("pdf")) {
-        return Err("Choose a PDF file with the .pdf extension.".into());
-    }
-    let config = state.config.get();
-    let preset_settings = match preset.as_deref().filter(|p| !p.trim().is_empty()) {
-        Some(name) => config
-            .presets
-            .get(name)
-            .map(|p| p.settings.clone())
-            .ok_or_else(|| format!("Preset '{}' was not found", name))?,
-        None => Default::default(),
-    };
-    let merged = preset_settings.overlay(&settings);
-    merged.validate()?;
-
-    let printer_name = merged
-        .printer
-        .clone()
-        .or_else(|| state.default_printer())
-        .unwrap_or_default();
-    let job = crate::settings::JobSettings::resolve(&merged, printer_name.clone());
-    let default_paper = if job.paper == crate::settings::Paper::PrinterDefault && !printer_name.is_empty() {
-        printer::default_paper_mm(&printer_name)
-    } else {
-        (210.0, 297.0)
-    };
-
-    let tmp = state.jobs_dir.join(format!("preview-{}.pdf", uuid::Uuid::new_v4()));
-    let result = (|| -> Result<String, String> {
-        layout::build(&path, &tmp, &job, default_paper)?;
-        let pdfium = layout::pdfium()?;
-        let doc = pdfium
-            .load_pdf_from_file(&tmp, None)
-            .map_err(|e| format!("Could not open the laid-out sheet: {}", e))?;
-        let png = crate::template::render_page_png(&doc, 0, 6.0)?;
-        Ok(format!(
-            "data:image/png;base64,{}",
-            base64::engine::general_purpose::STANDARD.encode(png)
-        ))
-    })();
-    let _ = std::fs::remove_file(&tmp);
-    result
+    blocking(move || {
+        crate::application::preset_service::preview_pdf_sheet(&state, &pdf_path, preset.as_deref(), &settings)
+    })
+    .await?
 }
 
 // ---- printer devices (OS level; not exposed over HTTP) ----------------------
 
 #[tauri::command]
-pub async fn printer_devices() -> Result<Vec<printer::manage::Device>, String> {
-    blocking(printer::manage::devices).await?
+pub async fn printer_devices(state: AppStateRef<'_>) -> Result<Vec<crate::domain::printer_admin::Device>, String> {
+    let state = state.inner().clone();
+    blocking(move || crate::application::printer_service::devices(&state)).await?
 }
 
 #[tauri::command]
-pub async fn printer_drivers(query: String) -> Result<Vec<printer::manage::Driver>, String> {
-    blocking(move || printer::manage::drivers(&query)).await?
+pub async fn printer_drivers(
+    state: AppStateRef<'_>,
+    query: String,
+) -> Result<Vec<crate::domain::printer_admin::Driver>, String> {
+    let state = state.inner().clone();
+    blocking(move || crate::application::printer_service::drivers(&state, &query)).await?
 }
 
 #[tauri::command]
-pub async fn printer_details(state: AppStateRef<'_>, name: String) -> Result<printer::manage::PrinterDetails, String> {
-    reject_remote_printer(state.inner().clone(), &name).await?;
-    blocking(move || printer::manage::details(&name)).await?
+pub async fn printer_details(
+    state: AppStateRef<'_>,
+    name: String,
+) -> Result<crate::domain::printer_admin::PrinterDetails, String> {
+    let state = state.inner().clone();
+    blocking(move || crate::application::printer_service::details(&state, &name)).await?
 }
 
 #[tauri::command]
-pub async fn printer_add(printer: printer::manage::NewPrinter) -> Result<(), String> {
-    blocking(move || printer::manage::add(&printer)).await?
+pub async fn printer_add(
+    state: AppStateRef<'_>,
+    printer: crate::domain::printer_admin::NewPrinter,
+) -> Result<(), String> {
+    let state = state.inner().clone();
+    blocking(move || crate::application::printer_service::add(&state, &printer)).await?
 }
 
 /// Edits a printer; a rename also updates the default printer and presets.
@@ -576,80 +423,37 @@ pub async fn printer_add(printer: printer::manage::NewPrinter) -> Result<(), Str
 pub async fn printer_update(
     state: AppStateRef<'_>,
     name: String,
-    edit: printer::manage::PrinterEdit,
+    edit: crate::domain::printer_admin::PrinterEdit,
 ) -> Result<Config, String> {
-    reject_remote_printer(state.inner().clone(), &name).await?;
-    let (old, new) = (name.clone(), edit.name.clone());
-    blocking(move || printer::manage::update(&name, &edit)).await??;
-    if old == new {
-        return Ok(state.config.get());
-    }
-    state.config.update(&mut |c| {
-        let rename = |p: &mut Option<String>| {
-            if p.as_deref() == Some(old.as_str()) {
-                *p = Some(new.clone());
-            }
-        };
-        rename(&mut c.default_printer);
-        c.presets.values_mut().for_each(|p| rename(&mut p.settings.printer));
-        Ok(())
-    })
+    let state = state.inner().clone();
+    blocking(move || crate::application::printer_service::update_local(&state, &name, &edit)).await?
 }
 
 #[tauri::command]
 pub async fn printer_remove(state: AppStateRef<'_>, name: String) -> Result<Config, String> {
-    reject_remote_printer(state.inner().clone(), &name).await?;
-    let target = name.clone();
-    blocking(move || printer::manage::remove(&target)).await??;
-    state.config.update(&mut |c| {
-        if c.default_printer.as_deref() == Some(name.as_str()) {
-            c.default_printer = None;
-        }
-        Ok(())
-    })
+    let state = state.inner().clone();
+    blocking(move || crate::application::printer_service::remove(&state, &name)).await?
 }
 
 #[tauri::command]
 pub async fn printer_set_os_default(state: AppStateRef<'_>, name: String) -> Result<(), String> {
-    reject_remote_printer(state.inner().clone(), &name).await?;
-    blocking(move || printer::manage::set_os_default(&name)).await?
-}
-
-async fn reject_remote_printer(state: Arc<AppState>, name: &str) -> Result<(), String> {
-    let name = name.to_string();
-    blocking(move || {
-        let local = printer::list_printers().into_iter().map(|p| p.name).collect::<Vec<_>>();
-        if matches!(
-            remote::resolve(&local, &state.remotes.list(), &name),
-            Target::Remote { .. }
-        ) {
-            Err("Printers of another ix.print are managed on that computer".into())
-        } else {
-            Ok(())
-        }
-    })
-    .await?
+    let state = state.inner().clone();
+    blocking(move || crate::application::printer_service::set_os_default(&state, &name)).await?
 }
 
 #[tauri::command]
 pub fn get_config(state: AppStateRef<'_>) -> Config {
-    state.config.get()
+    crate::application::preset_service::config(&state)
 }
 
 #[tauri::command]
 pub fn set_default_printer(state: AppStateRef<'_>, printer: Option<String>) -> Result<Config, String> {
-    state.config.update(&mut |c| {
-        c.default_printer = printer.clone().filter(|p| !p.trim().is_empty());
-        Ok(())
-    })
+    crate::application::printer_service::set_default(&state, printer)
 }
 
 #[tauri::command]
 pub fn set_default_preset(state: AppStateRef<'_>, name: Option<String>) -> Result<Config, String> {
-    state.config.update(&mut |c| {
-        c.default_preset = name.clone().filter(|p| !p.is_empty());
-        Ok(())
-    })
+    crate::application::preset_service::set_default_preset(&state, name)
 }
 
 /// Creates or updates a preset (settings + optional design); `original_name` renames it.
@@ -660,143 +464,70 @@ pub fn save_preset(
     original_name: Option<String>,
     preset: config::Preset,
 ) -> Result<Config, String> {
-    config::validate_preset_name(&name)?;
-    preset.validate()?;
-    let mut preset = Some(preset);
-    state.config.update(&mut |c| {
-        if let Some(original) = original_name.clone().filter(|o| o != &name) {
-            if c.presets.contains_key(&name) {
-                return Err(format!("Preset '{}' already exists", name));
-            }
-            c.presets.remove(&original);
-            if c.default_preset.as_ref() == Some(&original) {
-                c.default_preset = Some(name.clone());
-            }
-        }
-        let Some(preset) = preset.take() else {
-            return Err("Preset update was applied more than once".into());
-        };
-        c.presets.insert(name.clone(), preset);
-        Ok(())
-    })
+    crate::application::preset_service::save(&state, name, original_name, preset)
 }
 
 /// Print preview: the design filled with its sample data `rows` times; returns
 /// up to 6 page images (PNG data URLs) and the total page count.
 #[tauri::command]
 pub async fn preview_print(
+    state: AppStateRef<'_>,
     template: crate::template::Template,
     rows: usize,
     px_per_mm: Option<f32>,
 ) -> Result<(Vec<String>, usize), String> {
-    use base64::Engine;
-    let scale = px_per_mm.unwrap_or(4.0).clamp(1.0, 12.0);
-    let records = vec![template.sample.clone(); rows.clamp(1, crate::template::MAX_RECORDS)];
-    let (pages, total) =
-        blocking(move || crate::template::pages_png(&template, &records, &template.sample, 6, scale)).await??;
-    let urls = pages
-        .into_iter()
-        .map(|png| {
-            format!(
-                "data:image/png;base64,{}",
-                base64::engine::general_purpose::STANDARD.encode(png)
-            )
-        })
-        .collect();
-    Ok((urls, total))
+    let state = state.inner().clone();
+    blocking(move || crate::application::preset_service::preview_print(&state, &template, rows, px_per_mm)).await?
 }
 
 /// PNG data URL of a design filled with `data`, rendered exactly as it prints.
 #[tauri::command]
 pub async fn preview_template(
+    state: AppStateRef<'_>,
     template: crate::template::Template,
     data: crate::template::Record,
     px_per_mm: Option<f32>,
 ) -> Result<String, String> {
-    use base64::Engine;
-    let scale = px_per_mm.unwrap_or(8.0).clamp(1.0, 24.0);
-    let png = blocking(move || crate::template::preview_png(&template, &data, scale)).await??;
-    Ok(format!(
-        "data:image/png;base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(png)
-    ))
+    let state = state.inner().clone();
+    blocking(move || crate::application::preset_service::preview_template(&state, &template, &data, px_per_mm)).await?
 }
 
 #[tauri::command]
 pub fn delete_preset(state: AppStateRef<'_>, name: String) -> Result<Config, String> {
-    state.config.update(&mut |c| {
-        c.presets.remove(&name);
-        if c.default_preset.as_ref() == Some(&name) {
-            c.default_preset = None;
-        }
-        Ok(())
-    })
-}
-
-#[derive(serde::Serialize)]
-pub struct CreatedToken {
-    /// The only time the plain token is available.
-    token: String,
-    config: Config,
+    crate::application::preset_service::remove(&state, &name)
 }
 
 #[tauri::command]
 pub fn create_token(state: AppStateRef<'_>, name: String) -> Result<CreatedToken, String> {
-    let (token, stored) = crate::auth::generate(&name)?;
-    let config = state.config.update(&mut |c| {
-        c.tokens.push(stored.clone());
-        Ok(())
-    })?;
-    Ok(CreatedToken { token, config })
+    crate::application::token_service::create(&state, &name)
 }
 
 /// Revokes a token; clients using it get 401 from then on.
 #[tauri::command]
 pub fn revoke_token(state: AppStateRef<'_>, id: String) -> Result<Config, String> {
-    state.config.update(&mut |c| {
-        c.tokens.retain(|t| t.id != id);
-        Ok(())
-    })
+    crate::application::token_service::revoke(&state, &id)
 }
 
 #[tauri::command]
 pub fn set_require_token(state: AppStateRef<'_>, required: bool) -> Result<Config, String> {
-    state.config.update(&mut |c| {
-        c.require_token = required;
-        Ok(())
-    })
+    crate::application::token_service::set_required(&state, required)
 }
 
 /// Replaces the websites allowed to call the API from a browser.
 #[tauri::command]
 pub fn set_allowed_origins(state: AppStateRef<'_>, origins: Vec<String>) -> Result<Config, String> {
-    let mut list: Vec<String> = Vec::new();
-    for o in origins.iter().filter(|o| !o.trim().is_empty()) {
-        let o = config::normalize_origin(o)?;
-        if !list.contains(&o) {
-            list.push(o);
-        }
-    }
-    state.config.update(&mut |c| {
-        c.allowed_origins = list.clone();
-        Ok(())
-    })
+    crate::application::token_service::set_allowed_origins(&state, &origins)
 }
 
 /// Last use of each token since ix.print started, by token id.
 #[tauri::command]
 pub fn token_usage(state: AppStateRef<'_>) -> std::collections::HashMap<String, crate::auth::TokenUse> {
-    state.token_usage.snapshot()
+    crate::application::token_service::usage(&state)
 }
 
 #[tauri::command]
 pub fn set_history_retention(state: AppStateRef<'_>, days: u32) -> Result<Config, String> {
-    let config = state.config.update(&mut |c| {
-        c.history_retention_days = days;
-        Ok(())
-    })?;
-    state.history.prune(days);
-    Ok(config)
+    crate::application::history_service::set_retention(&state, days)
 }
 
 /// Writes selected presets (all when `names` is empty) to `path`.
@@ -808,7 +539,7 @@ pub fn export_presets(
     include_defaults: bool,
 ) -> Result<usize, String> {
     let names = names.filter(|n| !n.is_empty());
-    let bundle = PresetBundle::from_config(&state.config.get(), names.as_deref(), include_defaults);
+    let bundle = crate::application::preset_service::export_bundle(&state, names.as_deref(), include_defaults);
     let json = serde_json::to_string_pretty(&bundle).map_err(|e| e.to_string())?;
     json_file(&path)?;
     std::fs::write(&path, json).map_err(|e| format!("Failed to save {}: {}", path, e))?;
@@ -842,9 +573,7 @@ fn read_bundle(path: &str) -> Result<PresetBundle, String> {
 #[tauri::command]
 pub async fn preview_import(state: AppStateRef<'_>, path: String) -> Result<ImportPreview, String> {
     let bundle = read_bundle(&path)?;
-    let config = state.config.get();
-    let installed = blocking(|| printer::list_printers().into_iter().map(|p| p.name).collect::<Vec<_>>()).await?;
-    Ok(config::preview_import(&bundle, &config, &installed))
+    Ok(crate::application::preset_service::preview_import(&state, &bundle))
 }
 
 #[derive(serde::Serialize)]
@@ -856,17 +585,13 @@ pub struct ImportOutcome {
 #[tauri::command]
 pub fn apply_import(state: AppStateRef<'_>, path: String, options: ImportOptions) -> Result<ImportOutcome, String> {
     let bundle = read_bundle(&path)?;
-    let mut imported = Vec::new();
-    let config = state.config.update(&mut |c| {
-        imported = config::apply_import(c, &bundle, &options)?;
-        Ok(())
-    })?;
+    let (config, imported) = crate::application::preset_service::apply_import(&state, &bundle, &options)?;
     Ok(ImportOutcome { config, imported })
 }
 
 #[tauri::command]
 pub fn history_days(state: AppStateRef<'_>) -> Vec<HistoryDay> {
-    state.history.days()
+    crate::application::history_service::days(&state)
 }
 
 /// One page of a day's history (1-based `page`).
@@ -878,12 +603,12 @@ pub fn history_page(
     per_page: usize,
     failed_only: bool,
 ) -> Result<HistoryPage, String> {
-    state.history.read_page(&date, page, per_page, failed_only)
+    crate::application::history_service::page(&state, &date, page, per_page, failed_only)
 }
 
 #[tauri::command]
 pub fn error_log(state: AppStateRef<'_>) -> Result<Vec<crate::diagnostics::DiagnosticEntry>, String> {
-    state.diagnostics.read()
+    crate::application::diagnostics_service::list(&state)
 }
 
 #[tauri::command]
@@ -893,12 +618,12 @@ pub fn record_error(
     message: String,
     details: Option<String>,
 ) -> Result<(), String> {
-    state.diagnostics.record("error", &source, &message, details.as_deref())
+    crate::application::diagnostics_service::record(&state, &source, &message, details.as_deref())
 }
 
 #[tauri::command]
 pub fn clear_error_log(state: AppStateRef<'_>) -> Result<(), String> {
-    state.diagnostics.clear()
+    crate::application::diagnostics_service::clear(&state)
 }
 
 #[tauri::command]
@@ -1087,7 +812,8 @@ mod preview_pdf_tests {
     #[test]
     fn preview_matches_requested_orientation() {
         crate::layout::tests::init_for_tests();
-        let state = state();
+        let mut state = Arc::try_unwrap(state()).ok().unwrap();
+        state.pdf_engine = Arc::new(crate::infrastructure::pdf::PdfEngineAdapter);
         let dir = state.jobs_dir.parent().unwrap().to_path_buf();
         std::fs::create_dir_all(&state.jobs_dir).unwrap();
         let pdf = dir.join("source.pdf");
@@ -1098,7 +824,8 @@ mod preview_pdf_tests {
             orientation: Some("landscape".parse().unwrap()),
             ..Default::default()
         };
-        let url = render_pdf_sheet_preview(&state, pdf.to_str().unwrap(), None, settings).unwrap();
+        let url = crate::application::preset_service::preview_pdf_sheet(&state, pdf.to_str().unwrap(), None, &settings)
+            .unwrap();
         assert!(url.starts_with("data:image/png;base64,"));
         let png = base64::Engine::decode(
             &base64::engine::general_purpose::STANDARD,
@@ -1112,15 +839,21 @@ mod preview_pdf_tests {
         assert!(w > h, "landscape A4 preview should be wider than tall, got {}x{}", w, h);
 
         // No PDF extension: rejected before touching PDFium or the filesystem.
-        let err = render_pdf_sheet_preview(&state, "source.txt", None, PrintSettings::default()).unwrap_err();
+        let err = crate::application::preset_service::preview_pdf_sheet(
+            &state,
+            "source.txt",
+            None,
+            &PrintSettings::default(),
+        )
+        .unwrap_err();
         assert!(err.contains(".pdf"));
 
         // Unknown preset: rejected before rendering.
-        let err = render_pdf_sheet_preview(
+        let err = crate::application::preset_service::preview_pdf_sheet(
             &state,
             pdf.to_str().unwrap(),
-            Some("nope".into()),
-            PrintSettings::default(),
+            Some("nope"),
+            &PrintSettings::default(),
         )
         .unwrap_err();
         assert!(err.contains("was not found"));

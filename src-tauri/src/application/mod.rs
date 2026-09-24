@@ -1,3 +1,11 @@
+pub mod callback_service;
+pub mod diagnostics_service;
+pub mod history_service;
+pub mod job_service;
 pub mod ports;
+pub mod preset_service;
+pub mod printer_service;
+pub mod remote_service;
 pub mod security;
 pub mod state;
+pub mod token_service;

@@ -65,44 +65,6 @@ fn lan_access_false_roundtrips() {
 }
 
 #[test]
-fn export_import_roundtrip() {
-    let mut src = Config::default();
-    src.presets.insert("struk".into(), preset("EPSON"));
-    src.presets.insert("laporan".into(), preset("HP"));
-    src.default_preset = Some("struk".into());
-    src.default_printer = Some("HP".into());
-    let text = serde_json::to_string(&PresetBundle::from_config(&src, None, true)).unwrap();
-    let bundle = PresetBundle::parse(&text).unwrap();
-
-    let mut dst = Config::default();
-    dst.presets.insert("struk".into(), preset("OLD"));
-    let preview = preview_import(&bundle, &dst, &["HP".to_string()]);
-    let struk = preview.items.iter().find(|i| i.name == "struk").unwrap();
-    assert!(struk.exists && struk.printer_missing);
-
-    let options = ImportOptions {
-        replace_all: false,
-        include_defaults: true,
-        decisions: vec![ImportDecision {
-            name: "struk".into(),
-            action: ImportAction::Rename,
-            new_name: None,
-            printer: Some("LOCAL-EPSON".into()),
-        }],
-    };
-    let imported = apply_import(&mut dst, &bundle, &options).unwrap();
-    assert_eq!(imported, vec!["laporan".to_string(), "struk (2)".to_string()]);
-    assert_eq!(dst.presets["struk"].settings.printer.as_deref(), Some("OLD"));
-    assert_eq!(
-        dst.presets["struk (2)"].settings.printer.as_deref(),
-        Some("LOCAL-EPSON")
-    );
-    assert_eq!(dst.default_preset.as_deref(), Some("struk (2)"));
-    assert_eq!(dst.default_printer.as_deref(), Some("HP"));
-    dst.validate().unwrap();
-}
-
-#[test]
 fn preset_json_shape_and_migration() {
     // Old presets (no design) keep their shape; unknown keys are still rejected.
     let p: Preset = serde_json::from_str(r#"{"paper":"A4","copies":2}"#).unwrap();

@@ -1,20 +1,14 @@
 //! Remote bridge operations retained here until their use cases and network client move in L4.8.
 
-use crate::config::Preset;
+use crate::domain::printer;
 pub use crate::domain::remote::*;
-use crate::domain::settings::{Align, Margins, Orientation, PrintSettings, Scale};
-use crate::history::{HistoryEntry, RemoteJob};
-pub use crate::infrastructure::persistence::remote_store::{RemoteCache, RemoteStore};
-use crate::job::{AppState, Document, JobError, JobRequest, JobResult};
-use crate::printer;
-use crate::shared::sync::LockExt;
+use crate::domain::settings::PrintSettings;
+pub use crate::infrastructure::persistence::remote_store::RemoteStore;
 use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
-use std::time::{Duration, Instant};
-
-const CACHE_TTL: Duration = Duration::from_secs(5);
+use std::time::Duration;
 
 #[derive(Deserialize)]
 struct RemotePrinterView {
@@ -118,91 +112,6 @@ pub fn fetch_printers(remote: &Remote) -> Result<Vec<printer::Printer>, RemoteEr
         .collect())
 }
 
-fn map_printers(remote: &Remote, printers: &[printer::Printer], offline: Option<&str>) -> Vec<printer::Printer> {
-    printers
-        .iter()
-        .cloned()
-        .map(|mut p| {
-            p.name = format!("{}{}{}", remote.name, SEPARATOR, p.name);
-            p.os_default = false;
-            if let Some(error) = offline {
-                p.status = "Offline".into();
-                p.message = Some(error.to_string());
-            }
-            p
-        })
-        .collect()
-}
-
-pub fn printers(state: &AppState, remote: &Remote) -> (Vec<printer::Printer>, Option<String>) {
-    refresh_printers(state, remote, false)
-}
-
-pub fn refresh_printers(state: &AppState, remote: &Remote, force: bool) -> (Vec<printer::Printer>, Option<String>) {
-    if !force {
-        if let Some(entry) = state.remote_cache.lock_safe().get(&remote.id) {
-            if entry.fetched.elapsed() < CACHE_TTL {
-                return (
-                    map_printers(
-                        remote,
-                        &entry.printers,
-                        (!entry.ok_once).then_some(entry.error.as_deref().unwrap_or("Remote has not been reached")),
-                    ),
-                    entry.error.clone(),
-                );
-            }
-        }
-    }
-    match fetch_printers(remote) {
-        Ok(list) => {
-            let mut cache = state.remote_cache.lock_safe();
-            cache.insert(
-                remote.id.clone(),
-                CacheEntry {
-                    fetched: Instant::now(),
-                    printers: list.clone(),
-                    error: None,
-                    ok_once: true,
-                },
-            );
-            (map_printers(remote, &list, None), None)
-        }
-        Err(error) => {
-            let message = error.to_string();
-            let mut cache = state.remote_cache.lock_safe();
-            let entry = cache.entry(remote.id.clone()).or_insert_with(|| CacheEntry {
-                fetched: Instant::now(),
-                printers: Vec::new(),
-                error: None,
-                ok_once: false,
-            });
-            entry.fetched = Instant::now();
-            entry.error = Some(message.clone());
-            (map_printers(remote, &entry.printers, Some(&message)), Some(message))
-        }
-    }
-}
-
-pub fn view(remote: &Remote, cache: &RemoteCache) -> RemoteView {
-    let cache = cache.lock_safe();
-    let entry = cache.get(&remote.id);
-    RemoteView {
-        id: remote.id.clone(),
-        name: remote.name.clone(),
-        url: remote.url.clone(),
-        preset: remote.preset.clone(),
-        token_hint: format!("{}…", &remote.token[..remote.token.len().min(10)]),
-        created_at: remote.created_at.clone(),
-        online: entry.map(|e| e.ok_once && e.error.is_none()),
-        last_error: entry.and_then(|e| e.error.clone()),
-        printers: entry.map(|e| e.printers.len()).unwrap_or(0),
-    }
-}
-
-pub fn views_from_list(remotes: &[Remote], cache: &RemoteCache) -> Vec<RemoteView> {
-    remotes.iter().map(|r| view(r, cache)).collect()
-}
-
 pub fn capabilities(remote: &Remote, name: &str) -> Result<printer::Capabilities, RemoteError> {
     let response = with_auth_no_body(
         agent(Duration::from_secs(5)).get(format!("{}/printer-capabilities", remote.url)),
@@ -284,96 +193,10 @@ pub fn test_page(remote: &Remote, pages: u32, settings: &PrintSettings) -> Resul
     read_response(remote, response)
 }
 
-pub(crate) struct ForwardRequest<'a> {
-    pub(crate) job_id: &'a str,
-    pub(crate) preset_name: Option<&'a str>,
-    pub(crate) preset: &'a Preset,
-    pub(crate) merged: &'a PrintSettings,
-    pub(crate) req: &'a JobRequest,
-    pub(crate) remote: &'a Remote,
-    pub(crate) remote_printer: &'a str,
-    pub(crate) record: &'a mut HistoryEntry,
-}
-
-pub(crate) fn forward(state: &AppState, request: ForwardRequest<'_>) -> Result<JobResult, JobError> {
-    let ForwardRequest {
-        job_id,
-        preset_name,
-        preset,
-        merged,
-        req,
-        remote,
-        remote_printer,
-        record,
-    } = request;
-    let mut settings = merged.clone();
-    settings.printer = Some(remote_printer.to_string());
-    let generated = state.jobs_dir.join(format!("{}-remote.pdf", job_id));
-    let result = (|| -> Result<RemotePrintResult, RemoteError> {
-        match &req.document {
-            Document::File(path) => print_pdf(remote, path, &req.file_name, &settings),
-            Document::Data { records, header } => {
-                let design = preset.design.as_ref().ok_or_else(|| {
-                    RemoteError::BadRequest(match preset_name {
-                        Some(name) => format!("Preset '{}' has no design; send a PDF instead of JSON data", name),
-                        None => "Specify a preset with a design in the \"preset\" field".into(),
-                    })
-                })?;
-                if records.len() > crate::template::MAX_RECORDS {
-                    return Err(RemoteError::BadRequest(format!(
-                        "at most {} records per job",
-                        crate::template::MAX_RECORDS
-                    )));
-                }
-                crate::template::render(&generated, design, records, header).map_err(RemoteError::BadRequest)?;
-                design_settings(&mut settings, design, false);
-                print_pdf(remote, &generated, &req.file_name, &settings)
-            }
-            Document::TestPage { pages } if preset.design.is_some() => {
-                let design = preset.design.as_ref().unwrap();
-                let records = vec![design.sample.clone(); (*pages).clamp(1, crate::testpage::MAX_TEST_PAGES) as usize];
-                crate::template::render(&generated, design, &records, &design.sample)
-                    .map_err(RemoteError::BadRequest)?;
-                design_settings(&mut settings, design, true);
-                print_pdf(remote, &generated, &req.file_name, &settings)
-            }
-            Document::TestPage { pages } => test_page(remote, *pages, &settings),
-        }
-    })();
-    let _ = fs::remove_file(&generated);
-    let result = result.map_err(RemoteError::into_job_error)?;
-    record.settings = serde_json::to_value(&settings).unwrap_or_default();
-    record.sheets = result.sheets;
-    record.remote = Some(RemoteJob {
-        remote_id: remote.id.clone(),
-        remote_name: remote.name.clone(),
-        job_id: result.job_id.clone(),
-    });
-    Ok(JobResult {
-        job_id: job_id.to_string(),
-        printer: format!("{}{}{}", remote.name, SEPARATOR, remote_printer),
-        preset: preset_name.map(str::to_string),
-        sheets: result.sheets,
-        spooler_job: None,
-    })
-}
-
-fn design_settings(settings: &mut PrintSettings, design: &crate::template::Template, test: bool) {
-    settings.paper = Some(crate::job::design_paper(design));
-    settings.scale = Some(Scale::None);
-    settings.margins = Some(Margins::default());
-    settings.align = Some(Align::Center);
-    settings.orientation = Some(Orientation::Portrait);
-    settings.pages = None;
-    if test {
-        settings.copies = Some(1);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::{Margins, Paper};
+    use crate::settings::{Margins, Paper, Scale};
 
     fn remote(name: &str) -> Remote {
         Remote {
