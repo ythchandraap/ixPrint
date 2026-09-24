@@ -1,3 +1,4 @@
+use crate::application::ports::ConfigRepository;
 use crate::domain::settings_config::{Config, CONFIG_VERSION};
 use crate::shared::sync::RwLockExt;
 use std::fs;
@@ -43,6 +44,10 @@ impl ConfigStore {
         self.data.read_safe().clone()
     }
 
+    pub fn data_dir(&self) -> PathBuf {
+        self.path.parent().unwrap_or_else(|| Path::new(".")).to_path_buf()
+    }
+
     /// Applies `change` to a copy, validates it, persists it and only then makes it current.
     pub fn update<F>(&self, change: F) -> Result<Config, String>
     where
@@ -56,6 +61,20 @@ impl ConfigStore {
         write_atomic(&self.path, &next)?;
         *guard = next.clone();
         Ok(next)
+    }
+}
+
+impl ConfigRepository for ConfigStore {
+    fn get(&self) -> Config {
+        ConfigStore::get(self)
+    }
+
+    fn update(&self, change: &mut dyn FnMut(&mut Config) -> Result<(), String>) -> Result<Config, String> {
+        ConfigStore::update(self, |config| change(config))
+    }
+
+    fn data_dir(&self) -> PathBuf {
+        ConfigStore::data_dir(self)
     }
 }
 

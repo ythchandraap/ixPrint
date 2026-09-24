@@ -82,7 +82,7 @@ pub fn server_status(state: AppStateRef<'_>) -> Result<(), String> {
     if !state.config.get().bridge_enabled {
         return Err("The application bridge is disabled".into());
     }
-    match state.server_error.lock_safe().clone() {
+    match state.server.last_error() {
         Some(e) => Err(e),
         None => Ok(()),
     }
@@ -101,23 +101,19 @@ pub async fn set_bridge_enabled(state: AppStateRef<'_>, enabled: bool) -> Result
 
 /// Shared by the window command and the system-tray action.
 pub async fn set_bridge_enabled_inner(state: Arc<AppState>, enabled: bool) -> Result<Config, String> {
-    state.config.update(|c| {
+    state.config.update(&mut |c| {
         c.bridge_enabled = enabled;
         Ok(())
     })?;
 
     if enabled {
-        state.server_error.lock_safe().take();
-        let running = state.server_handle.lock_safe().is_some();
-        if !running {
-            crate::server::spawn(state.clone());
+        state.server.clear_error();
+        if !state.server.is_running() {
+            state.server.start(state.clone());
         }
     } else {
-        let handle = state.server_handle.lock_safe().take();
-        state.server_error.lock_safe().take();
-        if let Some(handle) = handle {
-            handle.stop(true).await;
-        }
+        state.server.clear_error();
+        state.server.stop().await;
     }
     Ok(state.config.get())
 }
@@ -131,18 +127,15 @@ pub async fn set_server_port(state: AppStateRef<'_>, port: u16) -> Result<Config
         return Ok(current);
     }
 
-    let next = state.config.update(|c| {
+    let next = state.config.update(&mut |c| {
         c.server_port = port;
         Ok(())
     })?;
 
     if next.bridge_enabled {
-        let handle = state.server_handle.lock_safe().take();
-        state.server_error.lock_safe().take();
-        if let Some(handle) = handle {
-            handle.stop(true).await;
-        }
-        crate::server::spawn(state);
+        state.server.stop().await;
+        state.server.clear_error();
+        state.server.start(state.clone());
     }
     Ok(next)
 }
@@ -156,18 +149,15 @@ pub async fn set_lan_access(state: AppStateRef<'_>, enabled: bool) -> Result<Con
         return Ok(current);
     }
 
-    let next = state.config.update(|c| {
+    let next = state.config.update(&mut |c| {
         c.lan_access = enabled;
         Ok(())
     })?;
 
     if next.bridge_enabled {
-        let handle = state.server_handle.lock_safe().take();
-        state.server_error.lock_safe().take();
-        if let Some(handle) = handle {
-            handle.stop(true).await;
-        }
-        crate::server::spawn(state);
+        state.server.stop().await;
+        state.server.clear_error();
+        state.server.start(state.clone());
     }
     Ok(next)
 }
@@ -199,7 +189,7 @@ fn remote_from_form(
 
 #[tauri::command]
 pub fn remote_list(state: AppStateRef<'_>) -> Vec<RemoteView> {
-    remote::views(&state.remotes, &state.remote_cache)
+    remote::views_from_list(&state.remotes.list(), &state.remote_cache)
 }
 
 #[tauri::command]
@@ -218,14 +208,14 @@ pub async fn remote_add(
     if let Some(error) = error {
         return Err(error);
     }
-    state.remotes.update(|list| {
+    state.remotes.update(&mut |list| {
         if list.iter().any(|r| r.name.eq_ignore_ascii_case(&remote.name)) {
             return Err(format!("Remote name '{}' is already used", remote.name));
         }
         list.push(remote.clone());
         Ok(())
     })?;
-    Ok(remote::views(&state.remotes, &state.remote_cache))
+    Ok(remote::views_from_list(&state.remotes.list(), &state.remote_cache))
 }
 
 #[tauri::command]
@@ -251,7 +241,7 @@ pub async fn remote_update(
     if let Some(error) = error {
         return Err(error);
     }
-    state.remotes.update(|list| {
+    state.remotes.update(&mut |list| {
         let item = list
             .iter_mut()
             .find(|r| r.id == id)
@@ -262,7 +252,7 @@ pub async fn remote_update(
     if old.name != remote.name {
         let old_prefix = format!("{}{}", old.name, remote::SEPARATOR);
         let new_prefix = format!("{}{}", remote.name, remote::SEPARATOR);
-        state.config.update(|config| {
+        state.config.update(&mut |config| {
             let rename = |value: &mut Option<String>| {
                 if let Some(value) = value.as_mut() {
                     if let Some(rest) = value.strip_prefix(&old_prefix) {
@@ -278,7 +268,7 @@ pub async fn remote_update(
             Ok(())
         })?;
     }
-    Ok(remote::views(&state.remotes, &state.remote_cache))
+    Ok(remote::views_from_list(&state.remotes.list(), &state.remote_cache))
 }
 
 #[tauri::command]
@@ -289,12 +279,12 @@ pub fn remote_remove(state: AppStateRef<'_>, id: String) -> Result<Vec<RemoteVie
         .into_iter()
         .find(|r| r.id == id)
         .ok_or("Remote computer was not found")?;
-    state.remotes.update(|list| {
+    state.remotes.update(&mut |list| {
         list.retain(|r| r.id != id);
         Ok(())
     })?;
     state.remote_cache.lock_safe().remove(&id);
-    state.config.update(|config| {
+    state.config.update(&mut |config| {
         if config
             .default_printer
             .as_deref()
@@ -304,7 +294,7 @@ pub fn remote_remove(state: AppStateRef<'_>, id: String) -> Result<Vec<RemoteVie
         }
         Ok(())
     })?;
-    Ok(remote::views(&state.remotes, &state.remote_cache))
+    Ok(remote::views_from_list(&state.remotes.list(), &state.remote_cache))
 }
 
 #[tauri::command]
@@ -594,7 +584,7 @@ pub async fn printer_update(
     if old == new {
         return Ok(state.config.get());
     }
-    state.config.update(|c| {
+    state.config.update(&mut |c| {
         let rename = |p: &mut Option<String>| {
             if p.as_deref() == Some(old.as_str()) {
                 *p = Some(new.clone());
@@ -611,7 +601,7 @@ pub async fn printer_remove(state: AppStateRef<'_>, name: String) -> Result<Conf
     reject_remote_printer(state.inner().clone(), &name).await?;
     let target = name.clone();
     blocking(move || printer::manage::remove(&target)).await??;
-    state.config.update(|c| {
+    state.config.update(&mut |c| {
         if c.default_printer.as_deref() == Some(name.as_str()) {
             c.default_printer = None;
         }
@@ -648,16 +638,16 @@ pub fn get_config(state: AppStateRef<'_>) -> Config {
 
 #[tauri::command]
 pub fn set_default_printer(state: AppStateRef<'_>, printer: Option<String>) -> Result<Config, String> {
-    state.config.update(|c| {
-        c.default_printer = printer.filter(|p| !p.trim().is_empty());
+    state.config.update(&mut |c| {
+        c.default_printer = printer.clone().filter(|p| !p.trim().is_empty());
         Ok(())
     })
 }
 
 #[tauri::command]
 pub fn set_default_preset(state: AppStateRef<'_>, name: Option<String>) -> Result<Config, String> {
-    state.config.update(|c| {
-        c.default_preset = name.filter(|p| !p.is_empty());
+    state.config.update(&mut |c| {
+        c.default_preset = name.clone().filter(|p| !p.is_empty());
         Ok(())
     })
 }
@@ -672,8 +662,9 @@ pub fn save_preset(
 ) -> Result<Config, String> {
     config::validate_preset_name(&name)?;
     preset.validate()?;
-    state.config.update(|c| {
-        if let Some(original) = original_name.filter(|o| o != &name) {
+    let mut preset = Some(preset);
+    state.config.update(&mut |c| {
+        if let Some(original) = original_name.clone().filter(|o| o != &name) {
             if c.presets.contains_key(&name) {
                 return Err(format!("Preset '{}' already exists", name));
             }
@@ -682,7 +673,10 @@ pub fn save_preset(
                 c.default_preset = Some(name.clone());
             }
         }
-        c.presets.insert(name, preset);
+        let Some(preset) = preset.take() else {
+            return Err("Preset update was applied more than once".into());
+        };
+        c.presets.insert(name.clone(), preset);
         Ok(())
     })
 }
@@ -730,7 +724,7 @@ pub async fn preview_template(
 
 #[tauri::command]
 pub fn delete_preset(state: AppStateRef<'_>, name: String) -> Result<Config, String> {
-    state.config.update(|c| {
+    state.config.update(&mut |c| {
         c.presets.remove(&name);
         if c.default_preset.as_ref() == Some(&name) {
             c.default_preset = None;
@@ -749,8 +743,8 @@ pub struct CreatedToken {
 #[tauri::command]
 pub fn create_token(state: AppStateRef<'_>, name: String) -> Result<CreatedToken, String> {
     let (token, stored) = crate::auth::generate(&name)?;
-    let config = state.config.update(|c| {
-        c.tokens.push(stored);
+    let config = state.config.update(&mut |c| {
+        c.tokens.push(stored.clone());
         Ok(())
     })?;
     Ok(CreatedToken { token, config })
@@ -759,7 +753,7 @@ pub fn create_token(state: AppStateRef<'_>, name: String) -> Result<CreatedToken
 /// Revokes a token; clients using it get 401 from then on.
 #[tauri::command]
 pub fn revoke_token(state: AppStateRef<'_>, id: String) -> Result<Config, String> {
-    state.config.update(|c| {
+    state.config.update(&mut |c| {
         c.tokens.retain(|t| t.id != id);
         Ok(())
     })
@@ -767,7 +761,7 @@ pub fn revoke_token(state: AppStateRef<'_>, id: String) -> Result<Config, String
 
 #[tauri::command]
 pub fn set_require_token(state: AppStateRef<'_>, required: bool) -> Result<Config, String> {
-    state.config.update(|c| {
+    state.config.update(&mut |c| {
         c.require_token = required;
         Ok(())
     })
@@ -783,8 +777,8 @@ pub fn set_allowed_origins(state: AppStateRef<'_>, origins: Vec<String>) -> Resu
             list.push(o);
         }
     }
-    state.config.update(|c| {
-        c.allowed_origins = list;
+    state.config.update(&mut |c| {
+        c.allowed_origins = list.clone();
         Ok(())
     })
 }
@@ -797,7 +791,7 @@ pub fn token_usage(state: AppStateRef<'_>) -> std::collections::HashMap<String, 
 
 #[tauri::command]
 pub fn set_history_retention(state: AppStateRef<'_>, days: u32) -> Result<Config, String> {
-    let config = state.config.update(|c| {
+    let config = state.config.update(&mut |c| {
         c.history_retention_days = days;
         Ok(())
     })?;
@@ -863,7 +857,7 @@ pub struct ImportOutcome {
 pub fn apply_import(state: AppStateRef<'_>, path: String, options: ImportOptions) -> Result<ImportOutcome, String> {
     let bundle = read_bundle(&path)?;
     let mut imported = Vec::new();
-    let config = state.config.update(|c| {
+    let config = state.config.update(&mut |c| {
         imported = config::apply_import(c, &bundle, &options)?;
         Ok(())
     })?;
@@ -955,6 +949,7 @@ pub async fn test_print(
 #[cfg(test)]
 mod desktop_print_tests {
     use super::*;
+    use crate::application::state::test_support::state;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
@@ -1003,31 +998,6 @@ mod desktop_print_tests {
         (port, server)
     }
 
-    fn mock_state(port: u16) -> AppState {
-        let dir = std::env::temp_dir().join(format!("ixprint-app-post-{}", uuid::Uuid::new_v4()));
-        let config = crate::config::ConfigStore::load(&dir);
-        config
-            .update(|c| {
-                c.server_port = port;
-                Ok(())
-            })
-            .unwrap();
-        AppState {
-            config,
-            desktop_key: "private-test-key".into(),
-            remotes: crate::remote::RemoteStore::load(&dir),
-            remote_cache: Default::default(),
-            server_error: Default::default(),
-            server_handle: Default::default(),
-            token_usage: Default::default(),
-            in_flight: Default::default(),
-            failed_auth: Default::default(),
-            history: crate::history::History::new(dir.join("history")),
-            diagnostics: crate::diagnostics::Diagnostics::new(&dir),
-            jobs_dir: dir.join("jobs"),
-        }
-    }
-
     fn headers_and_body(request: &[u8]) -> (String, String) {
         let split = request.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
         (
@@ -1040,7 +1010,12 @@ mod desktop_print_tests {
     fn desktop_print_posts_json_and_pdf_with_requested_copies() {
         for copies in [1, 4] {
             let (port, server) = mock_endpoint();
-            let state = mock_state(port);
+            let state = state();
+            let mut set_port = |config: &mut crate::domain::settings_config::Config| {
+                config.server_port = port;
+                Ok(())
+            };
+            state.config.update(&mut set_port).unwrap();
             let body = format!(
                 r#"{{"preset":"label","data":{{"name":"Example"}},"settings":{{"copies":{}}}}}"#,
                 copies
@@ -1053,7 +1028,7 @@ mod desktop_print_tests {
             assert!(headers.to_ascii_lowercase().contains("content-type: application/json"));
             assert!(headers
                 .to_ascii_lowercase()
-                .contains("x-ixprint-desktop: private-test-key"));
+                .contains("x-ixprint-desktop: test-desktop-key"));
             assert!(payload.contains(&format!("\"copies\":{}", copies)));
         }
 
@@ -1063,7 +1038,12 @@ mod desktop_print_tests {
         std::fs::write(&pdf, b"%PDF-1.4\nmock document").unwrap();
         for copies in [1, 4] {
             let (port, server) = mock_endpoint();
-            let state = mock_state(port);
+            let state = state();
+            let mut set_port = |config: &mut crate::domain::settings_config::Config| {
+                config.server_port = port;
+                Ok(())
+            };
+            state.config.update(&mut set_port).unwrap();
             let settings = PrintSettings {
                 copies: Some(copies),
                 printer: Some("Mock Printer / 1".into()),
@@ -1088,7 +1068,7 @@ mod desktop_print_tests {
                 .contains("content-type: multipart/form-data; boundary="));
             assert!(headers
                 .to_ascii_lowercase()
-                .contains("x-ixprint-desktop: private-test-key"));
+                .contains("x-ixprint-desktop: test-desktop-key"));
             assert!(payload.contains("filename=\"source.pdf\""));
             assert!(payload.contains("%PDF-1.4"));
         }
@@ -1099,24 +1079,7 @@ mod desktop_print_tests {
 #[cfg(test)]
 mod preview_pdf_tests {
     use super::*;
-
-    fn mock_state(dir: &std::path::Path) -> AppState {
-        std::fs::create_dir_all(dir.join("jobs")).unwrap();
-        AppState {
-            config: crate::config::ConfigStore::load(dir),
-            desktop_key: "test-desktop-key".into(),
-            remotes: crate::remote::RemoteStore::load(dir),
-            remote_cache: Default::default(),
-            server_error: Default::default(),
-            server_handle: Default::default(),
-            token_usage: Default::default(),
-            in_flight: Default::default(),
-            failed_auth: Default::default(),
-            history: crate::history::History::new(dir.join("history")),
-            diagnostics: crate::diagnostics::Diagnostics::new(dir),
-            jobs_dir: dir.join("jobs"),
-        }
-    }
+    use crate::application::state::test_support::state;
 
     /// The preview PNG must be the same sheet size `layout::build` would print,
     /// scaled by the design's own width/height — i.e. portrait vs. landscape
@@ -1124,8 +1087,9 @@ mod preview_pdf_tests {
     #[test]
     fn preview_matches_requested_orientation() {
         crate::layout::tests::init_for_tests();
-        let dir = std::env::temp_dir().join(format!("ixprint-preview-{}", uuid::Uuid::new_v4()));
-        let state = mock_state(&dir);
+        let state = state();
+        let dir = state.jobs_dir.parent().unwrap().to_path_buf();
+        std::fs::create_dir_all(&state.jobs_dir).unwrap();
         let pdf = dir.join("source.pdf");
         crate::testpage::generate(&pdf, 210.0, 297.0, &["test".into()], 1).unwrap();
 

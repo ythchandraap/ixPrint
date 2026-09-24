@@ -199,8 +199,8 @@ pub fn view(remote: &Remote, cache: &RemoteCache) -> RemoteView {
     }
 }
 
-pub fn views(store: &RemoteStore, cache: &RemoteCache) -> Vec<RemoteView> {
-    store.list().iter().map(|r| view(r, cache)).collect()
+pub fn views_from_list(remotes: &[Remote], cache: &RemoteCache) -> Vec<RemoteView> {
+    remotes.iter().map(|r| view(r, cache)).collect()
 }
 
 pub fn capabilities(remote: &Remote, name: &str) -> Result<printer::Capabilities, RemoteError> {

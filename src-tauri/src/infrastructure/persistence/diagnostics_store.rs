@@ -1,3 +1,4 @@
+use crate::application::ports::{DiagnosticsRepository, JobMarker};
 use crate::domain::diagnostics::DiagnosticEntry;
 use crate::shared::sync::LockExt;
 use std::fs::{self, OpenOptions};
@@ -18,6 +19,8 @@ pub struct Diagnostics {
 pub struct ActiveJobMarker {
     path: PathBuf,
 }
+
+impl JobMarker for ActiveJobMarker {}
 
 impl Drop for ActiveJobMarker {
     fn drop(&mut self) {
@@ -176,6 +179,28 @@ impl Diagnostics {
             );
             let _ = fs::remove_file(path);
         }
+    }
+}
+
+impl DiagnosticsRepository for Diagnostics {
+    fn begin_job(&self, id: &str, source: &str, printer: &str) -> Result<Box<dyn JobMarker>, String> {
+        Diagnostics::begin_job(self, id, source, printer).map(|marker| Box::new(marker) as Box<dyn JobMarker>)
+    }
+
+    fn record(&self, level: &str, source: &str, message: &str, details: Option<&str>) -> Result<(), String> {
+        Diagnostics::record(self, level, source, message, details)
+    }
+
+    fn read(&self) -> Result<Vec<DiagnosticEntry>, String> {
+        Diagnostics::read(self)
+    }
+
+    fn clear(&self) -> Result<(), String> {
+        Diagnostics::clear(self)
+    }
+
+    fn finish_session(&self) {
+        Diagnostics::finish_session(self)
     }
 }
 

@@ -1,5 +1,6 @@
 //! OS printer administration adapter with input validation and actionable errors.
 
+use crate::application::ports::PrinterAdmin;
 use crate::domain::printer_admin::{
     validate_connection, validate_name, validate_text, Device, Driver, NewPrinter, PrinterDetails, PrinterEdit,
 };
@@ -92,6 +93,39 @@ fn logged(action: &str, name: &str, result: Result<(), String>) -> Result<(), St
 
 pub fn set_os_default(name: &str) -> Result<(), String> {
     logged("set as default", name, os::set_os_default(name))
+}
+
+#[derive(Default)]
+pub struct LocalPrinterAdmin;
+
+impl PrinterAdmin for LocalPrinterAdmin {
+    fn devices(&self) -> Result<Vec<Device>, String> {
+        devices()
+    }
+
+    fn drivers(&self, query: &str) -> Result<Vec<Driver>, String> {
+        drivers(query)
+    }
+
+    fn details(&self, name: &str) -> Result<PrinterDetails, String> {
+        details(name)
+    }
+
+    fn add(&self, printer: &NewPrinter) -> Result<(), String> {
+        add(printer)
+    }
+
+    fn update(&self, name: &str, edit: &PrinterEdit) -> Result<(), String> {
+        update(name, edit)
+    }
+
+    fn remove(&self, name: &str) -> Result<(), String> {
+        remove(name)
+    }
+
+    fn set_os_default(&self, name: &str) -> Result<(), String> {
+        set_os_default(name)
+    }
 }
 
 /// Turns permission failures into an actionable message.

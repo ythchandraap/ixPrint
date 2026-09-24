@@ -1,3 +1,4 @@
+use crate::application::ports::HistoryRepository;
 use crate::domain::history::*;
 use crate::shared::sync::LockExt;
 use serde::{Deserialize, Serialize};
@@ -186,6 +187,32 @@ impl History {
                 (path.extension()? == "jsonl" && is_date(&stem)).then_some((stem, path))
             })
             .collect()
+    }
+}
+
+impl HistoryRepository for History {
+    fn append(&self, entry: &HistoryEntry) -> Result<(), String> {
+        History::append(self, entry)
+    }
+
+    fn append_callback(&self, job_id: &str, status: CallbackStatus) -> Result<(), String> {
+        History::append_callback(self, job_id, status)
+    }
+
+    fn find(&self, job_id: &str) -> Option<HistoryEntry> {
+        History::find(self, job_id)
+    }
+
+    fn read_page(&self, date: &str, page: usize, per_page: usize, failed_only: bool) -> Result<HistoryPage, String> {
+        History::read_page(self, date, page, per_page, failed_only)
+    }
+
+    fn days(&self) -> Vec<HistoryDay> {
+        History::days(self)
+    }
+
+    fn prune(&self, retention_days: u32) {
+        History::prune(self, retention_days)
     }
 }
 
