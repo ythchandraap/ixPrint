@@ -4,12 +4,11 @@ import { ArrowDown, ArrowUp, Barcode, ClipboardPaste, Copy, Image as ImageIcon, 
 import {
 	api,
 	errorText,
-	templateAutoFields,
-	templateFields,
 	type Template,
 	type TemplateElement,
-} from "../api";
-import AutocompleteField from "./AutocompleteField.vue";
+} from "@/shared/api";
+import { templateAutoFields, templateFields } from "@/shared/lib/template";
+import AutocompleteField from "@/components/AutocompleteField.vue";
 
 const props = defineProps<{
 	/** Name of the preset this design belongs to (for the example request). */
