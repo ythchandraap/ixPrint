@@ -2,8 +2,8 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { Copy, Globe, KeyRound, Plus, Trash2 } from "lucide-vue-next";
-import EmptyState from "./EmptyState.vue";
-import { api, errorText, type Config, type TokenUse } from "../api";
+import EmptyState from "@/components/EmptyState.vue";
+import { api, errorText, type Config, type TokenUse } from "@/shared/api";
 
 const props = defineProps<{ config: Config; localIp: string }>();
 const emit = defineEmits<{
