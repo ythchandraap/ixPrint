@@ -2,6 +2,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { api, errorText, isInApp, type Config, type PrinterView } from "@/shared/api";
+import { usePolling } from "./usePolling";
 
 export function useAppShell() {
 /** Product name, in one place so a rename touches a single line. */
@@ -35,7 +36,6 @@ const tabLabel = computed(() => ({ printers: "Printers", presets: "Presets", his
 const settingsOpen = ref(false);
 const onboardingOpen = ref(false);
 const toast = ref<{ text: string; error: boolean } | null>(null);
-const timers: number[] = [];
 let toastTimer: number | undefined;
 let unlistenTray: (() => void) | undefined;
 let unlistenBridge: (() => void) | undefined;
@@ -66,6 +66,9 @@ function completeOnboarding() {
 
 const refreshing = ref(false);
 const printersLoaded = ref(false);
+
+usePolling(() => refreshPrinters(), 3000);
+usePolling(refreshIp, 10000);
 
 /** Reloads the printer list and announces printers that appeared or disappeared. */
 async function refreshPrinters(manual = false) {
@@ -267,11 +270,9 @@ onMounted(async () => {
 	} catch (e) {
 		configError.value = errorText(e);
 	}
-	timers.push(window.setInterval(() => refreshPrinters(), 3000), window.setInterval(refreshIp, 10000));
 });
 
 onBeforeUnmount(() => {
-	timers.forEach(clearInterval);
 	unlistenTray?.();
 	unlistenBridge?.();
 });
