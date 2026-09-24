@@ -137,7 +137,13 @@ fn queue_impl(printer: &str) -> Result<PrinterQueue, String> {
         .iter()
         .map(|j| {
             let bits = j.Status;
-            let driver_msg = unsafe { j.pStatus.to_string() }.ok().filter(|m| !m.is_empty());
+            // JOB_INFO_1W::pStatus is optional; some drivers return null when
+            // there is no status message. PWSTR::to_string() dereferences it.
+            let driver_msg = if j.pStatus.is_null() {
+                None
+            } else {
+                unsafe { j.pStatus.to_string() }.ok().filter(|m| !m.is_empty())
+            };
             let (state, msg) = if bits & JOB_STATUS_PAPEROUT != 0 {
                 (JobState::Error, Some("Kertas habis"))
             } else if bits & JOB_STATUS_OFFLINE != 0 {
@@ -157,7 +163,11 @@ fn queue_impl(printer: &str) -> Result<PrinterQueue, String> {
             };
             QueueJob {
                 id: j.JobId.to_string(),
-                document: unsafe { j.pDocument.to_string() }.unwrap_or_default(),
+                document: if j.pDocument.is_null() {
+                    String::new()
+                } else {
+                    unsafe { j.pDocument.to_string() }.unwrap_or_default()
+                },
                 position: j.Position,
                 state,
                 message: driver_msg.or(msg.map(str::to_string)),

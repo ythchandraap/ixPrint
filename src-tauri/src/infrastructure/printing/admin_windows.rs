@@ -2,7 +2,9 @@
 //! Scripts are fixed text; user values only travel as `FXP_*` environment
 //! variables, so a printer name can never become PowerShell code.
 
-use crate::domain::printer_admin::{Connection, Device, Driver, NetProtocol, NewPrinter, PrinterDetails, PrinterEdit};
+use crate::domain::printer_admin::{
+    network_uri, Connection, Device, Driver, NetProtocol, NewPrinter, PrinterDetails, PrinterEdit,
+};
 use base64::Engine;
 use std::os::windows::process::CommandExt;
 use std::process::Command;
@@ -172,8 +174,7 @@ pub(crate) fn add_env(p: &NewPrinter) -> Result<Vec<(&'static str, String)>, Str
             queue,
         } if p.driver.is_none() => {
             env.push(("MODE", "ipp".into()));
-            let url = super::manage::network_uri(host, NetProtocol::Ipp, *port, queue.as_deref())
-                .replacen("ipp://", "http://", 1);
+            let url = network_uri(host, NetProtocol::Ipp, *port, queue.as_deref()).replacen("ipp://", "http://", 1);
             env.push(("URL", url));
         }
         Connection::Network {
