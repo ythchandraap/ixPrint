@@ -1,4 +1,9 @@
 pub mod auth;
+pub mod diagnostics;
+pub mod history;
 pub mod layout;
+pub mod preset;
+pub mod remote;
 pub mod settings;
+pub mod settings_config;
 pub mod template;
