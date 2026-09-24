@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from "vue";
 import { Copy, Pencil, Plus, Printer, RefreshCw, Star } from "lucide-vue-next";
-import EmptyState from "./EmptyState.vue";
+import EmptyState from "@/components/EmptyState.vue";
 import PrinterDeviceForm from "./PrinterDeviceForm.vue";
-import { api, describeJob, errorText, type Config, type PrinterQueue, type PrinterView } from "../api";
+import { api, errorText, type Config, type PrinterQueue, type PrinterView } from "@/shared/api";
+import { describeJob } from "@/shared/lib/job";
 
 const props = defineProps<{
 	printers: PrinterView[];
