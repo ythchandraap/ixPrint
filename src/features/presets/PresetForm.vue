@@ -3,16 +3,16 @@ import { computed, reactive, ref, watch } from "vue";
 import {
 	api,
 	errorText,
-	templateFields,
 	type Capabilities,
 	type Config,
 	type Preset,
 	type PrinterView,
 	type PrintSettings,
 	type Template,
-} from "../api";
-import AutocompleteField from "./AutocompleteField.vue";
-import DesignEditor from "./DesignEditor.vue";
+} from "@/shared/api";
+import { templateFields } from "@/shared/lib/template";
+import AutocompleteField from "@/components/AutocompleteField.vue";
+import DesignEditor from "@/components/DesignEditor.vue";
 
 const props = defineProps<{
 	/** Existing preset name, or undefined for a new preset. */
