@@ -148,6 +148,7 @@ export interface Config {
 	server_port: number;
 	require_token: boolean;
 	bridge_enabled: boolean;
+	lan_access: boolean;
 	/** Websites allowed to call the API from a browser; "*" = any. */
 	allowed_origins: string[];
 	tokens: ApiToken[];
@@ -435,6 +436,7 @@ export const api = {
 	bridgeEnabled: () => invoke<boolean>("bridge_enabled"),
 	setBridgeEnabled: (enabled: boolean) => invoke<Config>("set_bridge_enabled", { enabled }),
 	setServerPort: (port: number) => invoke<Config>("set_server_port", { port }),
+	setLanAccess: (enabled: boolean) => invoke<Config>("set_lan_access", { enabled }),
 	printers: () => invoke<PrinterView[]>("get_printers"),
 	remotes: () => invoke<RemoteView[]>("remote_list"),
 	remoteAdd: (name: string, url: string, token: string, preset?: string) =>

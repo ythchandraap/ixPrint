@@ -147,6 +147,31 @@ pub async fn set_server_port(state: AppStateRef<'_>, port: u16) -> Result<Config
     Ok(next)
 }
 
+/// Controls whether other computers on the network can reach the bridge.
+#[tauri::command]
+pub async fn set_lan_access(state: AppStateRef<'_>, enabled: bool) -> Result<Config, String> {
+    let state = state.inner().clone();
+    let current = state.config.get();
+    if current.lan_access == enabled {
+        return Ok(current);
+    }
+
+    let next = state.config.update(|c| {
+        c.lan_access = enabled;
+        Ok(())
+    })?;
+
+    if next.bridge_enabled {
+        let handle = state.server_handle.lock_safe().take();
+        state.server_error.lock_safe().take();
+        if let Some(handle) = handle {
+            handle.stop(true).await;
+        }
+        crate::server::spawn(state);
+    }
+    Ok(next)
+}
+
 fn remote_from_form(
     name: String,
     url: String,

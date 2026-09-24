@@ -833,10 +833,12 @@ fn security_headers() -> DefaultHeaders {
 }
 
 pub async fn run(state: Arc<AppState>) -> std::io::Result<()> {
-    if !state.config.get().bridge_enabled {
+    let config = state.config.get();
+    if !config.bridge_enabled {
         return Ok(());
     }
-    let port = state.config.get().server_port;
+    let port = config.server_port;
+    let host = if config.lan_access { "0.0.0.0" } else { "127.0.0.1" };
     let data = web::Data::new(state.clone());
     let cors_state = state.clone();
     let server = HttpServer::new(move || {
@@ -851,7 +853,7 @@ pub async fn run(state: Arc<AppState>) -> std::io::Result<()> {
     .client_disconnect_timeout(std::time::Duration::from_secs(5))
     .keep_alive(std::time::Duration::from_secs(30))
     .max_connections(256)
-    .bind(("0.0.0.0", port))?
+    .bind((host, port))?
     .run();
     *state.server_error.lock_safe() = None;
     *state.server_handle.lock_safe() = Some(server.handle());

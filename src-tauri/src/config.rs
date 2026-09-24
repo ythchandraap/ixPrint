@@ -152,6 +152,9 @@ pub struct Config {
     /// Whether the local HTTP bridge accepts connections from web apps.
     #[serde(default = "default_true")]
     pub bridge_enabled: bool,
+    /// Whether the bridge accepts connections from other computers on the network.
+    #[serde(default = "default_true")]
+    pub lan_access: bool,
     #[serde(default)]
     pub tokens: Vec<ApiToken>,
     /// Version 1 templates; moved into `presets` when the config is loaded.
@@ -171,6 +174,7 @@ impl Default for Config {
             require_token: true,
             allowed_origins: Vec::new(),
             bridge_enabled: true,
+            lan_access: true,
             tokens: Vec::new(),
             templates: BTreeMap::new(),
         }
@@ -583,10 +587,12 @@ mod tests {
         // New config: token required, no website allowed.
         let fresh = Config::default();
         assert!(fresh.require_token && fresh.allowed_origins.is_empty());
+        assert!(fresh.lan_access);
         assert_eq!(fresh.server_port, DEFAULT_SERVER_PORT);
         // Saved before origins existed: every website stays allowed, visibly.
         let old: Config = serde_json::from_str(r#"{"version":2,"require_token":false}"#).unwrap();
         assert!(!old.require_token);
+        assert!(old.lan_access);
         assert_eq!(old.allowed_origins, vec!["*"]);
         assert_eq!(old.server_port, DEFAULT_SERVER_PORT);
         let mut c = Config {
@@ -597,6 +603,17 @@ mod tests {
         c.allowed_origins = Vec::new();
         c.server_port = 1023;
         assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn lan_access_false_roundtrips() {
+        let config = Config {
+            lan_access: false,
+            ..Config::default()
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let roundtrip: Config = serde_json::from_str(&json).unwrap();
+        assert!(!roundtrip.lan_access);
     }
 
     #[test]
