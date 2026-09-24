@@ -13,6 +13,10 @@ use std::str::FromStr;
 const MM_PER_INCH: f32 = 25.4;
 const PT_PER_INCH: f32 = 72.0;
 
+/// Upper bound for a custom/roll paper side, mirroring template.rs's
+/// MAX_SIZE_MM so both paths reject the same absurd sizes.
+pub const MAX_PAPER_MM: f32 = 2000.0;
+
 pub fn mm_to_pt(mm: f32) -> f32 {
     mm / MM_PER_INCH * PT_PER_INCH
 }
@@ -511,6 +515,21 @@ impl PrintSettings {
 				return Err("Printer name cannot be empty".into());
             }
         }
+        if let Some(paper) = &self.paper {
+            let sides: &[f32] = match paper {
+                Paper::Custom { width_mm, height_mm } => &[*width_mm, *height_mm],
+                Paper::Roll { width_mm } => &[*width_mm],
+                _ => &[],
+            };
+            for &v in sides {
+                if !(10.0..=MAX_PAPER_MM).contains(&v) {
+                    return Err(format!(
+                        "Custom paper size must be between 10 and {} mm per side",
+                        MAX_PAPER_MM
+                    ));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -633,6 +652,15 @@ mod tests {
         );
         assert!("banana".parse::<Paper>().is_err());
         assert_eq!(Paper::Custom { width_mm: 100.0, height_mm: 150.0 }.to_string(), "100x150mm");
+    }
+
+    #[test]
+    fn validate_rejects_oversized_custom_paper() {
+        let settings = PrintSettings {
+            paper: Some(Paper::Custom { width_mm: 50000.0, height_mm: 50000.0 }),
+            ..Default::default()
+        };
+        assert!(settings.validate().unwrap_err().contains("must be between"));
     }
 
     #[test]

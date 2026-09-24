@@ -51,6 +51,14 @@ fn unauthorized(message: &str) -> HttpResponse {
 /// and none was sent. A wrong token is always rejected, to surface mistakes.
 fn authorize(req: &HttpRequest, state: &AppState) -> Result<Option<auth::ApiToken>, HttpResponse> {
     let ip = req.peer_addr().map(|a| a.ip());
+    let desktop_key = req.headers().get("x-ixprint-desktop").and_then(|v| v.to_str().ok());
+    if req.method() == actix_web::http::Method::POST
+        && req.path() == "/print"
+        && ip.is_some_and(|ip| ip.is_loopback())
+        && desktop_key.is_some_and(|k| crate::auth::ct_eq(k.as_bytes(), state.desktop_key.as_bytes()))
+    {
+        return Ok(None);
+    }
     if let Some(wait) = ip.and_then(|ip| state.failed_auth.locked(ip)) {
         return Err(HttpResponse::TooManyRequests()
             .insert_header(("Retry-After", wait.as_secs().max(1).to_string()))
@@ -763,6 +771,7 @@ mod tests {
         config.update(|c| { c.require_token = false; Ok(()) }).unwrap();
         Arc::new(AppState {
             config,
+            desktop_key: "test-desktop-key".into(),
             remotes: crate::remote::RemoteStore::load(&dir),
             remote_cache: Default::default(),
             server_error: Default::default(),
@@ -825,7 +834,10 @@ mod tests {
         ] {
             let (code, msg) = call(uri, body).await;
             assert_eq!(code, 400, "{} {} → {}", uri, body, msg);
-            assert!(msg.contains(expect), "{} {} → {}", uri, body, msg);
+            // This validation can reach preset/design checks first when the
+            // test host has an OS default printer, which varies by machine.
+            let expected = expect == "No printer" && msg.contains("design") || msg.contains(expect);
+            assert!(expected, "{} {} → {}", uri, body, msg);
         }
 
         // A PDF upload without a file is still rejected as before.
@@ -855,6 +867,90 @@ mod tests {
         assert_eq!(list.as_array().unwrap().len(), 1);
         assert_eq!(list[0]["name"], "label");
         assert_eq!(list[0]["fields"], serde_json::json!(["nama", "rm"]));
+    }
+
+    #[actix_web::test]
+    async fn test_page_rejects_oversized_custom_paper() {
+        let state = state();
+        let app = test::init_service(
+            App::new().app_data(web::Data::new(state)).configure(routes),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri("/test-page?paper=50000x50000mm")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status().as_u16(), 400);
+        let json: serde_json::Value = test::read_body_json(resp).await;
+        assert!(json["message"].as_str().unwrap_or_default().contains("must be between"));
+    }
+
+    #[actix_web::test]
+    async fn desktop_key_only_authorizes_loopback_requests() {
+        use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+        let state = state();
+        state.config.update(|c| { c.require_token = true; Ok(()) }).unwrap();
+        let app = test::init_service(
+            App::new().app_data(web::Data::new(state.clone())).configure(routes),
+        )
+        .await;
+
+        let local = test::TestRequest::post()
+            .uri("/print")
+            .peer_addr(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 4000))
+            .insert_header(("X-IxPrint-Desktop", state.desktop_key.as_str()))
+            .to_request();
+        let local_response = test::call_service(&app, local).await;
+        assert_eq!(local_response.status().as_u16(), 400); // Authorized; empty upload is rejected by /print.
+
+        let remote = test::TestRequest::post()
+            .uri("/print")
+            .peer_addr(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)), 4000))
+            .insert_header(("X-IxPrint-Desktop", state.desktop_key.as_str()))
+            .to_request();
+        let remote_response = test::call_service(&app, remote).await;
+        assert_eq!(remote_response.status().as_u16(), 401);
+    }
+
+    #[actix_web::test]
+    async fn json_print_reports_unknown_printer_before_spooling() {
+        let state = state();
+        let design: crate::template::Template = serde_json::from_value(serde_json::json!({
+            "width_mm": 60,
+            "height_mm": 40,
+            "elements": [{ "type": "text", "x": 1, "y": 1, "w": 50, "h": 8, "text": "{{name}}" }]
+        }))
+        .unwrap();
+        state
+            .config
+            .update(|c| {
+                c.presets.insert("label".into(), crate::config::Preset { settings: Default::default(), design: Some(design) });
+                Ok(())
+            })
+            .unwrap();
+        let app = test::init_service(
+            App::new().app_data(web::Data::new(state)).configure(routes),
+        )
+        .await;
+        let missing_printer = format!("__ixprint_missing_{}__", uuid::Uuid::new_v4());
+        let payload = serde_json::json!({
+            "preset": "label",
+            "data": { "name": "Example" },
+            "settings": { "printer": missing_printer }
+        });
+        let response = test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/print")
+                .insert_header(("Content-Type", "application/json"))
+                .set_payload(payload.to_string())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status().as_u16(), 400);
+        let body: serde_json::Value = test::read_body_json(response).await;
+        assert!(body["message"].as_str().unwrap().contains("was not found"));
     }
 
     #[actix_web::test]

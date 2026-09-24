@@ -2,11 +2,12 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
-import { ArrowLeft, ChevronDown, Copy, MonitorX, Printer, Settings } from "lucide-vue-next";
-import { api, describeJob, errorText, isInApp, FINAL_STATES, type Config, type JobStatus, type PrinterView } from "./api";
+import { ArrowLeft, Copy, MonitorX, Printer, Settings } from "lucide-vue-next";
+import { api, errorText, isInApp, type Config, type PrinterView } from "./api";
 import PrintersTab from "./components/PrintersTab.vue";
 import PresetsTab from "./components/PresetsTab.vue";
 import HistoryTab from "./components/HistoryTab.vue";
+import PrintTab from "./components/PrintTab.vue";
 import ErrorLogPanel from "./components/ErrorLogPanel.vue";
 import SettingsView from "./components/SettingsView.vue";
 import EmptyState from "./components/EmptyState.vue";
@@ -36,10 +37,12 @@ const printers = ref<PrinterView[]>([]);
 const config = ref<Config | null>(null);
 const selectedPrinter = ref("");
 const tab = ref<"printers" | "presets" | "history">("printers");
+const printPageOpen = ref(false);
+const requestedPreset = ref("");
+const tabLabel = computed(() => ({ printers: "Printers", presets: "Presets", history: "History" })[tab.value]);
 /** Settings (API tokens, API docs) replace the tabs while open. */
 const settingsOpen = ref(false);
 const onboardingOpen = ref(false);
-const printing = ref(false);
 const toast = ref<{ text: string; error: boolean } | null>(null);
 const timers: number[] = [];
 let toastTimer: number | undefined;
@@ -156,101 +159,28 @@ function setTestPages(n: number) {
 	}
 }
 
-/** Preset used by the header test-print menu; remembered on this computer. */
-function loadTestSource(): string {
-	try {
-		return localStorage.getItem("ixprint.testSource") ?? "";
-	} catch {
-		return "";
-	}
+function openPrintPage(preset = "") {
+	requestedPreset.value = preset;
+	settingsOpen.value = false;
+	printPageOpen.value = true;
 }
-const testSource = ref(loadTestSource());
-const validTestSource = computed(() => (config.value?.presets[testSource.value] ? testSource.value : ""));
-const testPresetOpen = ref(false);
-const testPresetActive = ref(-1);
-const testPresetSuggestions = computed(() => {
-	const query = testSource.value.trim().toLowerCase();
-	return Object.keys(config.value?.presets ?? {})
-		.filter((name) => !query || name.toLowerCase().includes(query))
-		.slice(0, 8);
-});
-const testDesign = computed(() => {
-	const name = validTestSource.value || config.value?.default_preset || "";
-	return !!config.value?.presets[name]?.design;
-});
-const testMenuOpen = ref(false);
-function setTestSource(value: string) {
-	testSource.value = value;
-	try {
-		localStorage.setItem("ixprint.testSource", value);
-	} catch {
-		// storage unavailable; keep it for this session only
-	}
-}
-function openTestPresetSuggestions() {
-	testPresetOpen.value = true;
-	testPresetActive.value = -1;
-}
-function selectTestPreset(name: string) {
-	setTestSource(name);
-	testPresetOpen.value = false;
-	testPresetActive.value = -1;
-}
-function onTestPresetKeydown(event: KeyboardEvent) {
-	if (event.key === "Escape") {
-		testPresetOpen.value = false;
-		return;
-	}
-	if (!testPresetOpen.value || !testPresetSuggestions.value.length) return;
-	if (event.key === "ArrowDown") {
-		event.preventDefault();
-		testPresetActive.value = (testPresetActive.value + 1) % testPresetSuggestions.value.length;
-	} else if (event.key === "ArrowUp") {
-		event.preventDefault();
-		testPresetActive.value =
-			testPresetActive.value <= 0 ? testPresetSuggestions.value.length - 1 : testPresetActive.value - 1;
-	} else if (event.key === "Enter" && testPresetActive.value >= 0) {
-		event.preventDefault();
-		selectTestPreset(testPresetSuggestions.value[testPresetActive.value]);
+
+function toggleSettings() {
+	if (settingsOpen.value) {
+		settingsOpen.value = false;
+	} else {
+		settingsOpen.value = true;
+		printPageOpen.value = false;
 	}
 }
 
-/** The last test print, followed through the spooler until it finishes. */
-const tracked = ref<JobStatus | null>(null);
-let trackTimer: number | undefined;
-
-function trackJob(jobId: string) {
-	clearInterval(trackTimer);
-	const started = Date.now();
-	const poll = async () => {
-		try {
-			const status = await api.jobStatus(jobId);
-			const previous = tracked.value?.state;
-			tracked.value = status;
-			if (status.state === "error" && previous !== "error") notify(describeJob(status), true);
-			// Stop at a final state, or after 10 minutes of waiting.
-			if (FINAL_STATES.includes(status.state) || Date.now() - started > 600_000) clearInterval(trackTimer);
-		} catch {
-			clearInterval(trackTimer);
-		}
-	};
-	poll();
-	trackTimer = window.setInterval(poll, 2000);
+function closePrintPage() {
+	printPageOpen.value = false;
 }
 
-/** Test print: the preset's design with sample data, or the edge-to-edge test page. The selected printer wins. */
-async function testPrint(preset: string | null = null) {
-	testMenuOpen.value = false;
-	printing.value = true;
-	try {
-		const result = await api.testPrint(selectedPrinter.value || null, preset, testPages.value);
-		notify(`Sent to ${result.printer} (${result.sheets} sheet${result.sheets === 1 ? "" : "s"})`);
-		trackJob(result.job_id);
-	} catch (e) {
-		notify(errorText(e), true);
-	} finally {
-		printing.value = false;
-	}
+function selectTab(name: "printers" | "presets" | "history") {
+	printPageOpen.value = false;
+	tab.value = name;
 }
 
 function reload() {
@@ -312,9 +242,11 @@ onMounted(async () => {
 	unlistenTray = await listen<string>("tray-navigate", (event) => {
 		if (event.payload === "errors") {
 			settingsOpen.value = true;
+			printPageOpen.value = false;
 			nextTick(() => document.getElementById("error-logs")?.scrollIntoView({ block: "start", behavior: "smooth" }));
 		} else {
 			settingsOpen.value = false;
+			printPageOpen.value = false;
 			tab.value = event.payload === "history" ? "history" : "printers";
 		}
 	});
@@ -347,83 +279,34 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
 	timers.forEach(clearInterval);
-	clearInterval(trackTimer);
 	unlistenTray?.();
 	unlistenBridge?.();
 });
 </script>
 
 <template>
-	<div class="app" @click="testMenuOpen = false">
+	<div class="app">
 		<div class="top">
 			<header class="appbar">
 				<div class="bar">
 					<span class="wordmark" :aria-label="PRODUCT">{{ PRODUCT }}</span>
 					<span class="grow"></span>
-					<div class="test-menu" @click.stop>
-						<button
-							class="bar-btn"
-							:aria-expanded="testMenuOpen"
-							aria-haspopup="menu"
-							:disabled="!inApp || printing"
-							title="Choose a preset and test print options"
-							@click="testMenuOpen = !testMenuOpen"
-						>
-							<Printer :size="14" /> {{ printing ? "Sending…" : "Test print" }} <ChevronDown :size="14" />
-						</button>
-						<div v-if="testMenuOpen" class="test-popover" role="menu">
-							<strong>Test print options</strong>
-							<label class="field">
-								<span>Use</span>
-								<div class="autocomplete">
-									<input
-										:value="testSource"
-										:placeholder="`Default preset${config?.default_preset ? ` (${config.default_preset})` : ''}`"
-										aria-label="Preset for test print"
-										:aria-expanded="testPresetOpen"
-										aria-controls="test-preset-options"
-										@focus="openTestPresetSuggestions"
-										@input="setTestSource(($event.target as HTMLInputElement).value); openTestPresetSuggestions()"
-										@keydown="onTestPresetKeydown"
-									/>
-									<div v-if="testPresetOpen && testPresetSuggestions.length" id="test-preset-options" class="autocomplete-menu" role="listbox">
-										<button
-											v-for="(p, i) in testPresetSuggestions"
-											:key="p"
-											type="button"
-											:class="['autocomplete-option', { active: testPresetActive === i }]"
-											:aria-selected="testPresetActive === i"
-											@click="selectTestPreset(p)"
-										>
-											<span class="grow truncate">{{ p }}</span>
-										<span v-if="config?.presets[p].design" class="autocomplete-meta">DESIGN</span>
-										</button>
-									</div>
-								</div>
-							</label>
-							<div class="row">
-								<label class="field test-pages-field">
-									<span>Number of pages</span>
-									<input class="test-pages-input" type="number" min="1" max="50" :value="testPages" @change="setTestPages(Number(($event.target as HTMLInputElement).value))" />
-								</label>
-								<button class="primary small test-submit" :disabled="printing" @click="testPrint(validTestSource || null)">
-									<Printer :size="14" /> Print
-								</button>
-							</div>
-							<p class="hint">
-								To {{ selectedPrinter || "the printer from the preset / default printer" }}.
-								<template v-if="testDesign">The preset design is printed with sample data.</template>
-								<template v-else>The test page uses the preset's paper size and offsets.</template>
-							</p>
-						</div>
-					</div>
+					<button
+						:class="['bar-btn', { on: printPageOpen }]"
+						:aria-pressed="printPageOpen"
+						:disabled="!inApp"
+						title="Open test print options"
+						@click="openPrintPage()"
+					>
+						<Printer :size="14" /> Test print
+					</button>
 					<button
 						:class="['bar-icon', { on: settingsOpen }]"
 						:aria-pressed="settingsOpen"
 						aria-label="Settings: API & documentation"
 						title="Settings: API & documentation"
 						:disabled="!inApp"
-						@click="settingsOpen = !settingsOpen"
+						@click="toggleSettings()"
 					>
 						<Settings :size="16" />
 					</button>
@@ -467,21 +350,14 @@ onBeforeUnmount(() => {
 			<p v-if="serverState === 'error'" class="banner">{{ serverError }}. Close any other application using the configured port, then restart {{ PRODUCT }}.</p>
 
 			<p v-if="engineError" class="banner">PDF engine unavailable: {{ engineError }}</p>
-			<div v-if="tracked" :class="['job-bar', tracked.state]">
-				<span class="grow truncate">
-					Print → {{ tracked.printer }}: <strong>{{ describeJob(tracked) }}</strong>
-				</span>
-				<button class="icon" title="Close" @click="tracked = null">✕</button>
-			</div>
-
 			<nav v-if="settingsOpen" class="tabs settings-bar">
 				<button class="icon" title="Back" @click="settingsOpen = false"><ArrowLeft :size="18" /></button>
 				<strong>Settings</strong>
 			</nav>
 			<nav v-else class="tabs">
-				<button :class="{ on: tab === 'printers' }" @click="tab = 'printers'">Printers</button>
-				<button :class="{ on: tab === 'presets' }" @click="tab = 'presets'">Presets</button>
-				<button :class="{ on: tab === 'history' }" @click="tab = 'history'">History</button>
+				<button :class="{ on: !printPageOpen && tab === 'printers' }" @click="selectTab('printers')">Printers</button>
+				<button :class="{ on: !printPageOpen && tab === 'presets' }" @click="selectTab('presets')">Presets</button>
+				<button :class="{ on: !printPageOpen && tab === 'history' }" @click="selectTab('history')">History</button>
 			</nav>
 		</div>
 
@@ -513,6 +389,21 @@ onBeforeUnmount(() => {
 				@docs="openDocs"
 				@printers-changed="refreshPrinters"
 			/>
+			<PrintTab
+				v-else-if="printPageOpen"
+				:config="config"
+				:printers="printers"
+				:printers-loaded="printersLoaded"
+				:selected-printer="selectedPrinter"
+				:test-pages="testPages"
+				:requested-preset="requestedPreset"
+				:return-label="tabLabel"
+				@back="closePrintPage"
+				@presets="selectTab('presets')"
+				@printers="selectTab('printers')"
+				@select-printer="selectedPrinter = $event"
+				@test-pages="setTestPages"
+			/>
 			<PrintersTab
 				v-else-if="tab === 'printers'"
 				:printers="printers"
@@ -538,7 +429,7 @@ onBeforeUnmount(() => {
 				:server-port="config.server_port"
 				@config="setConfig"
 				@notify="notify"
-				@test="testPrint"
+				@open-print="openPrintPage"
 			/>
 			<HistoryTab v-else :config="config" @config="setConfig" @notify="notify" />
 		</main>
@@ -718,97 +609,9 @@ body {
 	border-color: var(--cobalt);
 	color: var(--cobalt-light);
 }
-.test-menu {
-	position: relative;
-	flex: none;
-}
-.test-menu .bar-btn {
-	display: inline-flex;
-	align-items: center;
-	gap: 6px;
-}
-.test-popover {
-	position: absolute;
-	right: 0;
-	top: calc(100% + 8px);
-	z-index: 15;
-	width: min(300px, calc(100vw - 32px));
-	display: flex;
-	flex-direction: column;
-	gap: 10px;
-	padding: 12px;
-	background: var(--surface);
-	color: var(--text);
-	border: 1px solid var(--line);
-	border-radius: var(--r-md);
-	box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
-}
-.test-popover .field {
-	font-size: 12px;
-}
-.autocomplete {
-	position: relative;
-}
-.autocomplete-menu {
-	position: absolute;
-	left: 0;
-	right: 0;
-	top: calc(100% + 4px);
-	z-index: 2;
-	max-height: 184px;
-	overflow-y: auto;
-	padding: 4px;
-	background: var(--surface);
-	border: 1px solid var(--line);
-	border-radius: var(--r-md);
-	box-shadow: 0 6px 18px rgb(0 0 0 / 0.14);
-}
-.autocomplete-option {
-	width: 100%;
-	min-height: 32px;
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	padding: 6px 8px;
-	border: none;
-	border-radius: var(--r-sm);
-	background: transparent;
-	color: var(--text);
-	font: inherit;
-	font-size: 13px;
-	text-align: left;
-	cursor: pointer;
-}
-.autocomplete-option:hover,
-.autocomplete-option.active {
-	background: var(--brand-pale);
-}
-.autocomplete-meta {
-	font-family: var(--font-mono);
-	font-size: 10px;
-	letter-spacing: 0.04em;
-	color: var(--brand);
-}
-.test-popover .row {
-	align-items: flex-end;
-}
-.test-pages-field {
-	flex: 1;
-}
-.test-pages-input {
-	width: 86px !important;
-}
-.test-pages-input::-webkit-outer-spin-button,
-.test-pages-input::-webkit-inner-spin-button {
-	margin: 0;
-	-webkit-appearance: none;
-}
-.test-pages-input[type="number"] {
-	-moz-appearance: textfield;
-	appearance: textfield;
-}
-.test-submit {
-	flex: none;
+.bar-btn.on {
+	border-color: var(--cobalt);
+	color: var(--cobalt-light);
 }
 .statusline {
 	display: flex;
@@ -929,29 +732,6 @@ body {
 	background: var(--danger-soft);
 	color: var(--danger);
 	font-size: 13px;
-}
-
-.job-bar {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	margin: 12px 16px 0;
-	padding: 4px 4px 4px 12px;
-	border-left: 2px solid var(--accent);
-	border-radius: var(--r-sm);
-	font-size: 13px;
-	background: var(--brand-pale);
-	color: var(--text);
-}
-.job-bar.completed {
-	border-left-color: var(--ok);
-	background: var(--ok-soft);
-}
-.job-bar.error,
-.job-bar.failed {
-	border-left-color: var(--danger);
-	background: var(--danger-soft);
-	color: var(--danger);
 }
 
 /* ---- navigation ----------------------------------------------------------- */

@@ -72,6 +72,25 @@ fn validate_url(url: &str) -> Result<(), String> {
     if authority.is_empty() || url.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return Err(bad());
     }
+    let host = if let Some(bracketed) = authority.strip_prefix('[') {
+        bracketed.split_once(']').map(|(host, _)| host).unwrap_or_default()
+    } else {
+        authority.rsplit_once(':').map(|(host, _)| host).unwrap_or(authority)
+    };
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        let blocked = match ip {
+            std::net::IpAddr::V4(ip) => ip.is_loopback() || ip.is_link_local(),
+            std::net::IpAddr::V6(ip) => {
+                let octets = ip.octets();
+                ip.is_loopback() || (octets[0] == 0xfe && octets[1] & 0xc0 == 0x80)
+            }
+        };
+        if blocked {
+            return Err("callback_url cannot target a loopback or link-local address".into());
+        }
+    } else {
+        // DNS-rebinding protection is deferred to a later iteration.
+    }
     if authority.contains('@') {
 		return Err("callback_url must not contain a username or password".into());
     }
@@ -282,6 +301,19 @@ mod tests {
         assert!(Callback::from_request(Some("https://a.id/cb"), Some(&long), Some(&token)).is_err());
     }
 
+    #[test]
+    fn rejects_loopback_and_link_local_ip_literals() {
+        for url in [
+            "http://127.0.0.1:8080/hook",
+            "http://169.254.169.254/latest/meta-data",
+            "http://[::1]:9000/hook",
+        ] {
+            assert!(validate_url(url).unwrap_err().contains("cannot target a loopback or link-local address"), "{}", url);
+        }
+        assert!(validate_url("http://192.168.1.50:9000/hook").is_ok());
+        assert!(validate_url("https://simrs.contoh.id/api/print-callback?x=1").is_ok());
+    }
+
     /// Accepts one HTTP request on `listener`, answers 200, returns (headers, body).
     fn receive(listener: std::net::TcpListener) -> (String, String) {
         use std::io::{BufRead, BufReader, Read, Write};
@@ -312,6 +344,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ixprint-cb-{}", uuid::Uuid::new_v4()));
         let state = Arc::new(AppState {
             config: crate::config::ConfigStore::load(&dir),
+            desktop_key: "test-desktop-key".into(),
             remotes: crate::remote::RemoteStore::load(&dir),
             remote_cache: Default::default(),
             server_error: Default::default(),
@@ -348,7 +381,9 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/cb", listener.local_addr().unwrap());
         let (token, stored) = crate::auth::generate("SIMRS").unwrap();
-        let cb = Callback::from_request(Some(&url), Some("ORDER-42"), Some(&stored)).unwrap().unwrap();
+        // This test exercises delivery/signing with a local receiver. User supplied
+        // callback URLs go through validate_url, which intentionally rejects loopback.
+        let cb = Callback { url, reference: Some("ORDER-42".into()), key: stored.hash.clone() };
         let history = crate::history::History::new(dir.join("history"));
         watch(state, &job, cb).unwrap();
         let (head, body) = receive(listener);

@@ -426,6 +426,8 @@ export const api = {
 	localIp: () => invoke<string | null>("this_local_ip"),
 	/** Opens the /docs page in its own window, or in the browser when `external`. */
 	openDocs: (external = false) => invoke<void>("open_docs", { external }),
+	dataFolderPath: () => invoke<string>("data_folder_path"),
+	openDataFolder: () => invoke<void>("open_data_folder"),
 	os: () => invoke<string>("os_detected"),
 	engineStatus: () => invoke<void>("engine_status"),
 	/** Rejects with the reason when the HTTP server is not running. */
@@ -486,6 +488,17 @@ export const api = {
 	openSystemLogs: () => invoke<void>("open_system_logs"),
 	testPrint: (printer: string | null, preset: string | null, pages = 1) =>
 		invoke<JobResult>("test_print", { printer, preset, pages }),
+	/** Submits raw JSON or a PDF path through the local POST /print endpoint. */
+	appPrint: (input: { jsonBody?: string; pdfPath?: string; preset?: string | null; settings?: PrintSettings }) =>
+		invoke<JobResult>("app_print", {
+			jsonBody: input.jsonBody ?? null,
+			pdfPath: input.pdfPath ?? null,
+			preset: input.preset ?? null,
+			settings: input.settings ?? {},
+		}),
+	/** PNG data URL of the first sheet a PDF would print as, laid out exactly like the real job. */
+	previewPdfSheet: (pdfPath: string, preset: string | null, settings: PrintSettings) =>
+		invoke<string>("preview_pdf_sheet", { pdfPath, preset, settings }),
 };
 
 /** False when the page is opened in a normal browser instead of the ix.print app. */
