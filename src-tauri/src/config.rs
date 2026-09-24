@@ -4,6 +4,7 @@
 
 use crate::auth::ApiToken;
 use crate::settings::PrintSettings;
+use crate::sync::RwLockExt;
 use crate::template::Template;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -295,7 +296,7 @@ impl ConfigStore {
     }
 
     pub fn get(&self) -> Config {
-        self.data.read().unwrap().clone()
+        self.data.read_safe().clone()
     }
 
     /// Applies `change` to a copy, validates it, persists it and only then makes it current.
@@ -303,7 +304,7 @@ impl ConfigStore {
     where
         F: FnOnce(&mut Config) -> Result<(), String>,
     {
-        let mut guard = self.data.write().unwrap();
+        let mut guard = self.data.write_safe();
         let mut next = guard.clone();
         change(&mut next)?;
         next.version = CONFIG_VERSION;

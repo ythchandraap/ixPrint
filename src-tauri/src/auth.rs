@@ -1,6 +1,7 @@
 //! API tokens for the HTTP server. Only a SHA-256 hash of each token is stored
 //! in `config.json`; the token itself is shown once when it is created.
 
+use crate::sync::LockExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -85,7 +86,7 @@ pub struct FailedAttempts(Mutex<HashMap<IpAddr, (u32, Instant)>>);
 impl FailedAttempts {
     /// Remaining lockout for `ip`, if it is locked out.
     pub fn locked(&self, ip: IpAddr) -> Option<Duration> {
-        let map = self.0.lock().unwrap();
+        let map = self.0.lock_safe();
         let (count, since) = map.get(&ip)?;
         (*count >= MAX_FAILURES)
             .then(|| LOCKOUT.saturating_sub(since.elapsed()))
@@ -93,7 +94,7 @@ impl FailedAttempts {
     }
 
     pub fn fail(&self, ip: IpAddr) {
-        let mut map = self.0.lock().unwrap();
+        let mut map = self.0.lock_safe();
         let now = Instant::now();
         // Keep the map small: forget clients whose window or lockout has passed.
         map.retain(|_, (count, since)| {
@@ -112,7 +113,7 @@ impl FailedAttempts {
     }
 
     pub fn succeed(&self, ip: IpAddr) {
-        self.0.lock().unwrap().remove(&ip);
+        self.0.lock_safe().remove(&ip);
     }
 }
 
@@ -143,7 +144,7 @@ pub struct TokenUsage(Mutex<HashMap<String, TokenUse>>);
 
 impl TokenUsage {
     pub fn record(&self, id: &str, client: Option<String>) {
-        self.0.lock().unwrap().insert(
+        self.0.lock_safe().insert(
             id.to_string(),
             TokenUse {
                 time: chrono::Local::now().to_rfc3339(),
@@ -153,7 +154,7 @@ impl TokenUsage {
     }
 
     pub fn snapshot(&self) -> HashMap<String, TokenUse> {
-        self.0.lock().unwrap().clone()
+        self.0.lock_safe().clone()
     }
 }
 

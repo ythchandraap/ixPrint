@@ -9,6 +9,7 @@ use crate::history::{HistoryEntry, RemoteJob};
 use crate::job::{AppState, Document, JobError, JobRequest, JobResult};
 use crate::printer;
 use crate::settings::{Align, Margins, Orientation, PrintSettings, Scale};
+use crate::sync::{LockExt, RwLockExt};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -142,14 +143,14 @@ impl RemoteStore {
     }
 
     pub fn list(&self) -> Vec<Remote> {
-        self.data.read().unwrap().clone()
+        self.data.read_safe().clone()
     }
 
     pub fn update<F>(&self, change: F) -> Result<Vec<Remote>, String>
     where
         F: FnOnce(&mut Vec<Remote>) -> Result<(), String>,
     {
-        let mut guard = self.data.write().unwrap();
+        let mut guard = self.data.write_safe();
         let mut next = guard.clone();
         change(&mut next)?;
         validate_all(&next)?;
@@ -388,7 +389,7 @@ pub fn printers(state: &AppState, remote: &Remote) -> (Vec<printer::Printer>, Op
 
 pub fn refresh_printers(state: &AppState, remote: &Remote, force: bool) -> (Vec<printer::Printer>, Option<String>) {
     if !force {
-        if let Some(entry) = state.remote_cache.lock().unwrap().get(&remote.id) {
+        if let Some(entry) = state.remote_cache.lock_safe().get(&remote.id) {
             if entry.fetched.elapsed() < CACHE_TTL {
                 return (
                     map_printers(
@@ -403,7 +404,7 @@ pub fn refresh_printers(state: &AppState, remote: &Remote, force: bool) -> (Vec<
     }
     match fetch_printers(remote) {
         Ok(list) => {
-            let mut cache = state.remote_cache.lock().unwrap();
+            let mut cache = state.remote_cache.lock_safe();
             cache.insert(
                 remote.id.clone(),
                 CacheEntry {
@@ -417,7 +418,7 @@ pub fn refresh_printers(state: &AppState, remote: &Remote, force: bool) -> (Vec<
         }
         Err(error) => {
             let message = error.to_string();
-            let mut cache = state.remote_cache.lock().unwrap();
+            let mut cache = state.remote_cache.lock_safe();
             let entry = cache.entry(remote.id.clone()).or_insert_with(|| CacheEntry {
                 fetched: Instant::now(),
                 printers: Vec::new(),
@@ -432,7 +433,7 @@ pub fn refresh_printers(state: &AppState, remote: &Remote, force: bool) -> (Vec<
 }
 
 pub fn view(remote: &Remote, cache: &RemoteCache) -> RemoteView {
-    let cache = cache.lock().unwrap();
+    let cache = cache.lock_safe();
     let entry = cache.get(&remote.id);
     RemoteView {
         id: remote.id.clone(),

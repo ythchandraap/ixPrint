@@ -9,6 +9,7 @@ use crate::config::PresetBundle;
 use crate::job::{self, AppState, Document, JobError, JobRequest};
 use crate::printer;
 use crate::settings::PrintSettings;
+use crate::sync::LockExt;
 use actix_cors::Cors;
 use actix_multipart::Multipart;
 use actix_web::middleware::DefaultHeaders;
@@ -852,10 +853,10 @@ pub async fn run(state: Arc<AppState>) -> std::io::Result<()> {
     .max_connections(256)
     .bind(("0.0.0.0", port))?
     .run();
-    *state.server_error.lock().unwrap() = None;
-    *state.server_handle.lock().unwrap() = Some(server.handle());
+    *state.server_error.lock_safe() = None;
+    *state.server_handle.lock_safe() = Some(server.handle());
     let result = server.await;
-    state.server_handle.lock().unwrap().take();
+    state.server_handle.lock_safe().take();
     result
 }
 
@@ -865,7 +866,7 @@ pub fn spawn(state: Arc<AppState>) {
         if let Err(e) = actix_web::rt::System::new().block_on(run(state.clone())) {
             let msg = format!("Server port {} failed: {}", state.config.get().server_port, e);
             eprintln!("{}", msg);
-            *state.server_error.lock().unwrap() = Some(msg);
+            *state.server_error.lock_safe() = Some(msg);
         }
     });
 }

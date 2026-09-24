@@ -11,6 +11,7 @@ mod printer;
 mod remote;
 mod server;
 mod settings;
+mod sync;
 mod template;
 mod testpage;
 
