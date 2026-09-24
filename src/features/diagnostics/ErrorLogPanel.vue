@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { ChevronLeft, ChevronRight, Copy, ExternalLink, RefreshCw, ShieldAlert, Trash2, X } from "lucide-vue-next";
-import { api, errorText, type DiagnosticEntry } from "../api";
+import { api, errorText, type DiagnosticEntry } from "@/shared/api";
 
 const props = defineProps<{ showSystemLogs: boolean }>();
 const emit = defineEmits<{
