@@ -2,18 +2,17 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ArrowLeft, FileText, Printer, SlidersHorizontal, Upload } from "lucide-vue-next";
-import EmptyState from "./EmptyState.vue";
+import EmptyState from "@/components/EmptyState.vue";
 import {
 	api,
-	describeJob,
 	errorText,
-	FINAL_STATES,
 	type Config,
 	type JobResult,
 	type JobStatus,
 	type PrinterView,
 	type PrintSettings,
-} from "../api";
+} from "@/shared/api";
+import { describeJob, FINAL_STATES } from "@/shared/lib/job";
 
 const props = defineProps<{
 	config: Config;
