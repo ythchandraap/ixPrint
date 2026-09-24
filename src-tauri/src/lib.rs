@@ -1,3 +1,9 @@
+pub mod application;
+pub mod domain;
+pub mod infrastructure;
+pub mod interfaces;
+pub mod shared;
+
 mod auth;
 mod callback;
 mod canvas;
