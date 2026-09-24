@@ -9,30 +9,25 @@ use pdfium_render::prelude::*;
 use std::path::Path;
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 use windows::Win32::Graphics::Gdi::{
-    CreateDCW, CreateICW, DeleteDC, GetDeviceCaps, ResetDCW, SetBrushOrgEx, SetStretchBltMode,
-    StretchDIBits, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DEVMODEW, DIB_RGB_COLORS,
-    DMCOLOR_COLOR, DMCOLOR_MONOCHROME, DMCOLLATE_FALSE, DMDUP_HORIZONTAL, DMDUP_SIMPLEX,
-    DMDUP_VERTICAL, DMORIENT_LANDSCAPE, DMORIENT_PORTRAIT, DMPAPER_USER, DM_COLLATE, DM_COLOR,
-    DM_COPIES, DM_DEFAULTSOURCE, DM_DUPLEX, DM_ORIENTATION, DM_PAPERLENGTH, DM_PAPERSIZE,
-    DM_PAPERWIDTH, HALFTONE, HDC, LOGPIXELSX, LOGPIXELSY, PHYSICALHEIGHT, PHYSICALOFFSETX,
-    PHYSICALOFFSETY, PHYSICALWIDTH, SRCCOPY,
+    CreateDCW, CreateICW, DeleteDC, GetDeviceCaps, ResetDCW, SetBrushOrgEx, SetStretchBltMode, StretchDIBits,
+    BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DEVMODEW, DIB_RGB_COLORS, DMCOLLATE_FALSE, DMCOLOR_COLOR, DMCOLOR_MONOCHROME,
+    DMDUP_HORIZONTAL, DMDUP_SIMPLEX, DMDUP_VERTICAL, DMORIENT_LANDSCAPE, DMORIENT_PORTRAIT, DMPAPER_USER, DM_COLLATE,
+    DM_COLOR, DM_COPIES, DM_DEFAULTSOURCE, DM_DUPLEX, DM_ORIENTATION, DM_PAPERLENGTH, DM_PAPERSIZE, DM_PAPERWIDTH,
+    HALFTONE, HDC, LOGPIXELSX, LOGPIXELSY, PHYSICALHEIGHT, PHYSICALOFFSETX, PHYSICALOFFSETY, PHYSICALWIDTH, SRCCOPY,
 };
 use windows::Win32::Graphics::Printing::{
-    ClosePrinter, DocumentPropertiesW, EnumJobsW, EnumPrintersW, GetDefaultPrinterW, GetPrinterW,
-    OpenPrinterW, JOB_INFO_1W, JOB_STATUS_BLOCKED_DEVQ, JOB_STATUS_COMPLETE, JOB_STATUS_DELETED,
-    JOB_STATUS_DELETING, JOB_STATUS_ERROR, JOB_STATUS_OFFLINE, JOB_STATUS_PAPEROUT,
-    JOB_STATUS_PAUSED, JOB_STATUS_PRINTED, JOB_STATUS_PRINTING, JOB_STATUS_USER_INTERVENTION,
-    PRINTER_ATTRIBUTE_SHARED, PRINTER_ENUM_CONNECTIONS, PRINTER_ENUM_LOCAL, PRINTER_HANDLE,
-    PRINTER_INFO_2W, PRINTER_STATUS_DOOR_OPEN, PRINTER_STATUS_ERROR, PRINTER_STATUS_NOT_AVAILABLE,
-    PRINTER_STATUS_NO_TONER, PRINTER_STATUS_OFFLINE, PRINTER_STATUS_OUT_OF_MEMORY,
-    PRINTER_STATUS_PAPER_JAM, PRINTER_STATUS_PAPER_OUT, PRINTER_STATUS_PAPER_PROBLEM,
-    PRINTER_STATUS_PAUSED, PRINTER_STATUS_PRINTING, PRINTER_STATUS_SERVER_OFFLINE,
-    PRINTER_STATUS_TONER_LOW, PRINTER_STATUS_USER_INTERVENTION,
+    ClosePrinter, DocumentPropertiesW, EnumJobsW, EnumPrintersW, GetDefaultPrinterW, GetPrinterW, OpenPrinterW,
+    JOB_INFO_1W, JOB_STATUS_BLOCKED_DEVQ, JOB_STATUS_COMPLETE, JOB_STATUS_DELETED, JOB_STATUS_DELETING,
+    JOB_STATUS_ERROR, JOB_STATUS_OFFLINE, JOB_STATUS_PAPEROUT, JOB_STATUS_PAUSED, JOB_STATUS_PRINTED,
+    JOB_STATUS_PRINTING, JOB_STATUS_USER_INTERVENTION, PRINTER_ATTRIBUTE_SHARED, PRINTER_ENUM_CONNECTIONS,
+    PRINTER_ENUM_LOCAL, PRINTER_HANDLE, PRINTER_INFO_2W, PRINTER_STATUS_DOOR_OPEN, PRINTER_STATUS_ERROR,
+    PRINTER_STATUS_NOT_AVAILABLE, PRINTER_STATUS_NO_TONER, PRINTER_STATUS_OFFLINE, PRINTER_STATUS_OUT_OF_MEMORY,
+    PRINTER_STATUS_PAPER_JAM, PRINTER_STATUS_PAPER_OUT, PRINTER_STATUS_PAPER_PROBLEM, PRINTER_STATUS_PAUSED,
+    PRINTER_STATUS_PRINTING, PRINTER_STATUS_SERVER_OFFLINE, PRINTER_STATUS_TONER_LOW, PRINTER_STATUS_USER_INTERVENTION,
 };
 use windows::Win32::Storage::Xps::{
-    AbortDoc, DeviceCapabilitiesW, EndDoc, EndPage, StartDocW, StartPage, DC_BINNAMES, DC_BINS,
-    DC_COLORDEVICE, DC_DUPLEX, DC_MAXEXTENT, DC_PAPERNAMES, DC_PAPERS, DC_PAPERSIZE, DOCINFOW,
-    PRINTER_DEVICE_CAPABILITIES,
+    AbortDoc, DeviceCapabilitiesW, EndDoc, EndPage, StartDocW, StartPage, DC_BINNAMES, DC_BINS, DC_COLORDEVICE,
+    DC_DUPLEX, DC_MAXEXTENT, DC_PAPERNAMES, DC_PAPERS, DC_PAPERSIZE, DOCINFOW, PRINTER_DEVICE_CAPABILITIES,
 };
 
 const DEFAULT_MAX_DPI: u32 = 300;
@@ -78,7 +73,8 @@ fn on_spooler_thread<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) 
         .unwrap_or_else(|e| e.into_inner())
         .send(task)
         .map_err(|_| "The printer thread stopped".to_string())?;
-    rx.recv().map_err(|_| "The printer driver failed unexpectedly".to_string())
+    rx.recv()
+        .map_err(|_| "The printer driver failed unexpectedly".to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -96,15 +92,11 @@ pub fn list_printers() -> Vec<Printer> {
     }
     // u64 storage keeps PRINTER_INFO_2W suitably aligned.
     let mut buf = vec![0u64; (needed as usize).div_ceil(8)];
-    let bytes =
-        unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, needed as usize) };
-    if unsafe { EnumPrintersW(flags, PCWSTR::null(), 2, Some(bytes), &mut needed, &mut count) }
-        .is_err()
-    {
+    let bytes = unsafe { std::slice::from_raw_parts_mut(buf.as_mut_ptr() as *mut u8, needed as usize) };
+    if unsafe { EnumPrintersW(flags, PCWSTR::null(), 2, Some(bytes), &mut needed, &mut count) }.is_err() {
         return vec![];
     }
-    let infos =
-        unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const PRINTER_INFO_2W, count as usize) };
+    let infos = unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const PRINTER_INFO_2W, count as usize) };
     infos
         .iter()
         .map(|info| {
@@ -126,21 +118,25 @@ fn printer_status(bits: u32) -> (String, Option<String>) {
     const PROBLEMS: &[(u32, &str, &str)] = &[
         (PRINTER_STATUS_PAPER_OUT, "Error", "Kertas habis"),
         (PRINTER_STATUS_PAPER_JAM, "Error", "Kertas macet"),
-		(PRINTER_STATUS_PAPER_PROBLEM, "Error", "Paper problem"),
+        (PRINTER_STATUS_PAPER_PROBLEM, "Error", "Paper problem"),
         (PRINTER_STATUS_NO_TONER, "Error", "Tinta/toner habis"),
-		(PRINTER_STATUS_DOOR_OPEN, "Error", "Printer cover is open"),
+        (PRINTER_STATUS_DOOR_OPEN, "Error", "Printer cover is open"),
         (PRINTER_STATUS_USER_INTERVENTION, "Error", "Printer butuh tindakan"),
         (PRINTER_STATUS_OUT_OF_MEMORY, "Error", "Memori printer penuh"),
         (PRINTER_STATUS_OFFLINE, "Offline", "Printer offline"),
         (PRINTER_STATUS_SERVER_OFFLINE, "Offline", "Server printer offline"),
-		(PRINTER_STATUS_NOT_AVAILABLE, "Offline", "Printer unavailable"),
+        (PRINTER_STATUS_NOT_AVAILABLE, "Offline", "Printer unavailable"),
         (PRINTER_STATUS_ERROR, "Error", "Printer error"),
         (PRINTER_STATUS_PAUSED, "Paused", "Printer di-pause"),
     ];
     if let Some(&(_, status, msg)) = PROBLEMS.iter().find(|(bit, _, _)| bits & bit != 0) {
         return (status.into(), Some(msg.into()));
     }
-    let status = if bits & PRINTER_STATUS_PRINTING != 0 { "Printing" } else { "Normal" };
+    let status = if bits & PRINTER_STATUS_PRINTING != 0 {
+        "Printing"
+    } else {
+        "Normal"
+    };
     let warning = (bits & PRINTER_STATUS_TONER_LOW != 0).then(|| "Tinta/toner hampir habis".to_string());
     (status.into(), warning)
 }
@@ -177,7 +173,7 @@ fn queue_impl(printer: &str) -> Result<PrinterQueue, String> {
     let handle = PrinterHandle::open(&name)?;
 
     let info = winspool_buffer(|buf, needed| unsafe { GetPrinterW(handle.0, 2, buf, needed) }.is_ok())
-		.ok_or_else(|| format!("Could not read the status of printer '{}'", printer))?;
+        .ok_or_else(|| format!("Could not read the status of printer '{}'", printer))?;
     let info = unsafe { &*(info.as_ptr() as *const PRINTER_INFO_2W) };
     let (status, message) = printer_status(info.Status);
 
@@ -227,7 +223,12 @@ fn queue_impl(printer: &str) -> Result<PrinterQueue, String> {
         })
         .collect();
 
-    Ok(PrinterQueue { printer: printer.to_string(), status, message, jobs })
+    Ok(PrinterQueue {
+        printer: printer.to_string(),
+        status,
+        message,
+        jobs,
+    })
 }
 
 /// Windows drops finished jobs from the queue (unless "keep printed documents" is on).
@@ -273,7 +274,7 @@ impl PrinterHandle {
     fn open(name: &HSTRING) -> Result<Self, String> {
         let mut handle = PRINTER_HANDLE::default();
         unsafe { OpenPrinterW(PCWSTR(name.as_ptr()), &mut handle, None) }
-			.map_err(|_| format!("Printer '{}' was not found", name))?;
+            .map_err(|_| format!("Printer '{}' was not found", name))?;
         Ok(PrinterHandle(handle))
     }
 
@@ -281,12 +282,12 @@ impl PrinterHandle {
         let device = PCWSTR(name.as_ptr());
         let size = unsafe { DocumentPropertiesW(None, self.0, device, None, None, 0) };
         if size <= 0 {
-			return Err(format!("Could not read the settings for printer '{}'", name));
+            return Err(format!("Could not read the settings for printer '{}'", name));
         }
         let mut dm = DevMode(vec![0u64; (size as usize).div_ceil(8)]);
         let ptr = dm.get_mut() as *mut DEVMODEW;
         if unsafe { DocumentPropertiesW(None, self.0, device, Some(ptr), None, DM_OUT_BUFFER) } < 0 {
-			return Err(format!("Could not read the settings for printer '{}'", name));
+            return Err(format!("Could not read the settings for printer '{}'", name));
         }
         Ok(dm)
     }
@@ -305,7 +306,7 @@ impl PrinterHandle {
             )
         };
         if ret < 0 {
-			return Err(format!("Printer '{}' rejected the print settings", name));
+            return Err(format!("Printer '{}' rejected the print settings", name));
         }
         Ok(())
     }
@@ -328,7 +329,13 @@ fn device_caps<T: Default + Clone>(name: &HSTRING, cap: PRINTER_DEVICE_CAPABILIT
     }
     let mut buf = vec![T::default(); count as usize * item_len];
     let got = unsafe {
-        DeviceCapabilitiesW(device, PCWSTR::null(), cap, Some(PWSTR(buf.as_mut_ptr() as *mut u16)), None)
+        DeviceCapabilitiesW(
+            device,
+            PCWSTR::null(),
+            cap,
+            Some(PWSTR(buf.as_mut_ptr() as *mut u16)),
+            None,
+        )
     };
     if got <= 0 {
         return vec![];
@@ -482,16 +489,23 @@ fn sheet_devmode(
     unsafe {
         let s = &mut d.Anonymous1.Anonymous1;
         let landscape = !exact && sheet.is_landscape();
-        s.dmOrientation = if landscape { DMORIENT_LANDSCAPE } else { DMORIENT_PORTRAIT } as i16;
+        s.dmOrientation = if landscape {
+            DMORIENT_LANDSCAPE
+        } else {
+            DMORIENT_PORTRAIT
+        } as i16;
         if *paper != Paper::PrinterDefault {
             let (w, h) = if exact {
                 (pt_to_mm(sheet.width_pt), pt_to_mm(sheet.height_pt))
             } else {
-                (pt_to_mm(sheet.width_pt.min(sheet.height_pt)), pt_to_mm(sheet.width_pt.max(sheet.height_pt)))
+                (
+                    pt_to_mm(sheet.width_pt.min(sheet.height_pt)),
+                    pt_to_mm(sheet.width_pt.max(sheet.height_pt)),
+                )
             };
-            let known = papers.iter().find(|p| {
-                (p.info.width_mm - w).abs() < 1.0 && (p.info.height_mm - h).abs() < 1.0
-            });
+            let known = papers
+                .iter()
+                .find(|p| (p.info.width_mm - w).abs() < 1.0 && (p.info.height_mm - h).abs() < 1.0);
             match known {
                 Some(p) => {
                     d.dmFields |= DM_PAPERSIZE;
@@ -510,12 +524,7 @@ fn sheet_devmode(
     Ok(dm)
 }
 
-pub fn print(
-    printer: &str,
-    pdf: &Path,
-    sheets: &[Sheet],
-    o: &DeviceOptions,
-) -> Result<Option<String>, String> {
+pub fn print(printer: &str, pdf: &Path, sheets: &[Sheet], o: &DeviceOptions) -> Result<Option<String>, String> {
     let (printer, pdf, sheets) = (printer.to_string(), pdf.to_path_buf(), sheets.to_vec());
     let (job_name, paper, tray) = (o.job_name.to_string(), o.paper.clone(), o.tray.map(str::to_string));
     let (copies, collate, duplex, color, dpi) = (o.copies, o.collate, o.duplex, o.color, o.dpi);
@@ -534,12 +543,7 @@ pub fn print(
     })?
 }
 
-fn print_impl(
-    printer: &str,
-    pdf: &Path,
-    sheets: &[Sheet],
-    o: &DeviceOptions,
-) -> Result<Option<String>, String> {
+fn print_impl(printer: &str, pdf: &Path, sheets: &[Sheet], o: &DeviceOptions) -> Result<Option<String>, String> {
     let name = HSTRING::from(printer);
     let handle = PrinterHandle::open(&name)?;
     let mut base = handle.default_devmode(&name)?;
@@ -574,7 +578,7 @@ fn print_impl(
             .find(|(_, n)| n.eq_ignore_ascii_case(tray))
             .ok_or_else(|| {
                 let names: Vec<_> = trays.iter().map(|(_, n)| n.as_str()).collect();
-				format!("Tray '{}' does not exist. Options: {}", tray, names.join(", "))
+                format!("Tray '{}' does not exist. Options: {}", tray, names.join(", "))
             })?;
         let d = base.get_mut();
         d.dmFields |= DM_DEFAULTSOURCE;
@@ -585,7 +589,7 @@ fn print_impl(
     let pdfium = pdfium()?;
     let doc = pdfium
         .load_pdf_from_file(pdf, None)
-		.map_err(|e| format!("Print-ready PDF could not be opened: {}", e))?;
+        .map_err(|e| format!("Print-ready PDF could not be opened: {}", e))?;
     let grayscale = o.color == Some(ColorMode::Grayscale);
     let duplex = matches!(o.duplex, Some(Duplex::LongEdge | Duplex::ShortEdge));
 
@@ -607,11 +611,9 @@ fn print_impl(
     }
 
     let first_dm = sheet_devmode(&base, &handle, &name, &papers, o.paper, &sheets[0])?;
-    let dc = Dc(unsafe {
-        CreateDCW(&HSTRING::from("WINSPOOL"), &name, PCWSTR::null(), Some(first_dm.ptr()))
-    });
+    let dc = Dc(unsafe { CreateDCW(&HSTRING::from("WINSPOOL"), &name, PCWSTR::null(), Some(first_dm.ptr())) });
     if dc.0.is_invalid() {
-		return Err(format!("Printer '{}' could not be opened", printer));
+        return Err(format!("Printer '{}' could not be opened", printer));
     }
 
     let doc_name = HSTRING::from(o.job_name);
@@ -622,7 +624,7 @@ fn print_impl(
     };
     let job_id = unsafe { StartDocW(dc.0, &info) };
     if job_id <= 0 {
-		return Err(format!("Printer '{}' rejected the print job", printer));
+        return Err(format!("Printer '{}' rejected the print job", printer));
     }
 
     let result = (|| -> Result<(), String> {
@@ -632,19 +634,19 @@ fn print_impl(
             if current != Some(sheet) {
                 let dm = sheet_devmode(&base, &handle, &name, &papers, o.paper, &sheet)?;
                 if unsafe { ResetDCW(dc.0, dm.ptr()) }.is_invalid() {
-					return Err("Printer rejected the paper size/orientation change".into());
+                    return Err("Printer rejected the paper size/orientation change".into());
                 }
                 current = Some(sheet);
             }
             if unsafe { StartPage(dc.0) } <= 0 {
-				return Err("StartPage failed".into());
+                return Err("StartPage failed".into());
             }
             let drawn = match entry {
                 Some(i) => draw_sheet(dc.0, &doc, *i, &sheet, o.dpi, grayscale),
                 None => Ok(()),
             };
             if unsafe { EndPage(dc.0) } <= 0 {
-				return Err("EndPage failed".into());
+                return Err("EndPage failed".into());
             }
             drawn?;
         }
@@ -692,7 +694,7 @@ fn draw_sheet(
                 .use_print_quality(true)
                 .use_grayscale_rendering(grayscale),
         )
-		.map_err(|e| format!("sheet {} failed to render: {}", index + 1, e))?;
+        .map_err(|e| format!("sheet {} failed to render: {}", index + 1, e))?;
     let pixels = bitmap.as_raw_bytes();
 
     let info = BITMAPINFO {
@@ -731,7 +733,7 @@ fn draw_sheet(
         )
     };
     if lines == 0 {
-		return Err(format!("sheet {} failed to send to the printer", index + 1));
+        return Err(format!("sheet {} failed to send to the printer", index + 1));
     }
     Ok(())
 }

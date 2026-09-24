@@ -118,7 +118,10 @@ fn is_date(s: &str) -> bool {
 
 impl History {
     pub fn new(dir: PathBuf) -> History {
-        History { dir, lock: Mutex::new(()) }
+        History {
+            dir,
+            lock: Mutex::new(()),
+        }
     }
 
     fn day_file(&self, date: &str) -> PathBuf {
@@ -137,8 +140,11 @@ impl History {
             .find(job_id)
             .and_then(|e| e.time.get(..10).map(str::to_string))
             .unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
-        let line = serde_json::to_string(&CallbackLine { callback_for: job_id.to_string(), callback: status })
-            .map_err(|e| e.to_string())?;
+        let line = serde_json::to_string(&CallbackLine {
+            callback_for: job_id.to_string(),
+            callback: status,
+        })
+        .map_err(|e| e.to_string())?;
         self.append_line(&date, &line)
     }
 
@@ -156,7 +162,7 @@ impl History {
     /// Entries of one day, newest first. Damaged lines are skipped.
     pub fn read_day(&self, date: &str) -> Result<Vec<HistoryEntry>, String> {
         if !is_date(date) {
-			return Err(format!("Date '{}' is invalid (YYYY-MM-DD)", date));
+            return Err(format!("Date '{}' is invalid (YYYY-MM-DD)", date));
         }
         let _guard = self.lock.lock().unwrap();
         let text = match fs::read_to_string(self.day_file(date)) {
@@ -195,7 +201,13 @@ impl History {
     }
 
     /// `per_page` entries of `date`; `failed_only` keeps only failed jobs.
-    pub fn read_page(&self, date: &str, page: usize, per_page: usize, failed_only: bool) -> Result<HistoryPage, String> {
+    pub fn read_page(
+        &self,
+        date: &str,
+        page: usize,
+        per_page: usize,
+        failed_only: bool,
+    ) -> Result<HistoryPage, String> {
         let all = self.read_day(date)?;
         let failed = all.iter().filter(|e| !e.success).count();
         let list: Vec<HistoryEntry> = if failed_only {
@@ -208,16 +220,19 @@ impl History {
         let page = page.clamp(1, pages);
         let total = list.len();
         let entries = list.into_iter().skip((page - 1) * per_page).take(per_page).collect();
-        Ok(HistoryPage { entries, total, failed, page, pages, per_page })
+        Ok(HistoryPage {
+            entries,
+            total,
+            failed,
+            page,
+            pages,
+            per_page,
+        })
     }
 
     /// Days that have history, newest first.
     pub fn days(&self) -> Vec<HistoryDay> {
-        let mut dates: Vec<String> = self
-            .day_files()
-            .into_iter()
-            .map(|(date, _)| date)
-            .collect();
+        let mut dates: Vec<String> = self.day_files().into_iter().map(|(date, _)| date).collect();
         dates.sort_unstable_by(|a, b| b.cmp(a));
         dates
             .into_iter()
@@ -234,10 +249,9 @@ impl History {
 
     /// Deletes day files older than `retention_days`.
     pub fn prune(&self, retention_days: u32) {
-        let cutoff = (chrono::Local::now().date_naive()
-            - chrono::Duration::days(retention_days as i64))
-        .format("%Y-%m-%d")
-        .to_string();
+        let cutoff = (chrono::Local::now().date_naive() - chrono::Duration::days(retention_days as i64))
+            .format("%Y-%m-%d")
+            .to_string();
         let _guard = self.lock.lock().unwrap();
         for (date, path) in self.day_files() {
             if date < cutoff {

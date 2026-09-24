@@ -117,13 +117,7 @@ impl Diagnostics {
         }));
     }
 
-    pub fn record(
-        &self,
-        level: &str,
-        source: &str,
-        message: &str,
-        details: Option<&str>,
-    ) -> Result<(), String> {
+    pub fn record(&self, level: &str, source: &str, message: &str, details: Option<&str>) -> Result<(), String> {
         let _guard = self.lock.lock().unwrap_or_else(|e| e.into_inner());
         let entry = DiagnosticEntry {
             time: chrono::Local::now().to_rfc3339(),
@@ -132,7 +126,10 @@ impl Diagnostics {
             message: truncate(message, 4096),
             details: details.map(|s| truncate(s, 16_384)),
         };
-        if fs::metadata(&self.path).map(|m| m.len() > MAX_LOG_BYTES).unwrap_or(false) {
+        if fs::metadata(&self.path)
+            .map(|m| m.len() > MAX_LOG_BYTES)
+            .unwrap_or(false)
+        {
             let old = self.path.with_extension("jsonl.1");
             let _ = fs::remove_file(&old);
             fs::rename(&self.path, old).map_err(|e| e.to_string())?;
@@ -175,7 +172,9 @@ impl Diagnostics {
         let Ok(files) = fs::read_dir(dir) else { return };
         for file in files.flatten() {
             let path = file.path();
-            let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
             if !name.starts_with("active-job-") || !name.ends_with(".json") {
                 continue;
             }

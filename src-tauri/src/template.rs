@@ -198,13 +198,17 @@ impl Element {
             Element::Text { x, y, w, h, size, .. } => {
                 finite(&[*x, *y, *w, *h, *size]) && *w > 0.0 && *h > 0.0 && (2.0..=300.0).contains(size)
             }
-            Element::Line { x1, y1, x2, y2, width, .. } => finite(&[*x1, *y1, *x2, *y2, *width]) && *width > 0.0,
-            Element::Rect { x, y, w, h, stroke, .. } => finite(&[*x, *y, *w, *h, *stroke]) && *w > 0.0 && *h > 0.0 && *stroke >= 0.0,
+            Element::Line {
+                x1, y1, x2, y2, width, ..
+            } => finite(&[*x1, *y1, *x2, *y2, *width]) && *width > 0.0,
+            Element::Rect { x, y, w, h, stroke, .. } => {
+                finite(&[*x, *y, *w, *h, *stroke]) && *w > 0.0 && *h > 0.0 && *stroke >= 0.0
+            }
             Element::Barcode { x, y, w, h, .. } => finite(&[*x, *y, *w, *h]) && *w > 0.0 && *h > 0.0,
             Element::Qr { x, y, size, .. } => finite(&[*x, *y, *size]) && *size > 0.0,
             Element::Image { x, y, w, h, src, .. } => {
                 if src.len() > MAX_IMAGE_CHARS {
-					return Err("Image is too large (max. approx. 3 MB)".into());
+                    return Err("Image is too large (max. approx. 3 MB)".into());
                 }
                 finite(&[*x, *y, *w, *h]) && *w > 0.0 && *h > 0.0
             }
@@ -212,7 +216,7 @@ impl Element {
         if ok {
             Ok(())
         } else {
-			Err("Element size or position is invalid".into())
+            Err("Element size or position is invalid".into())
         }
     }
 }
@@ -271,9 +275,9 @@ pub struct Template {
 
 impl Template {
     pub fn validate(&self) -> Result<(), String> {
-		for (label, v) in [("width", self.width_mm), ("height", self.height_mm)] {
+        for (label, v) in [("width", self.width_mm), ("height", self.height_mm)] {
             if !(MIN_SIZE_MM..=MAX_SIZE_MM).contains(&v) {
-				return Err(format!("Template {} must be {}–{} mm", label, MIN_SIZE_MM, MAX_SIZE_MM));
+                return Err(format!("Template {} must be {}–{} mm", label, MIN_SIZE_MM, MAX_SIZE_MM));
             }
         }
         if self.elements.len() > MAX_ELEMENTS {
@@ -282,23 +286,39 @@ impl Template {
         for (i, el) in self.elements.iter().enumerate() {
             el.check().map_err(|e| format!("elemen #{}: {}", i + 1, e))?;
         }
-        if let Layout::List { header_mm, row_mm, footer_mm, footer, roll } = self.layout {
+        if let Layout::List {
+            header_mm,
+            row_mm,
+            footer_mm,
+            footer,
+            roll,
+        } = self.layout
+        {
             let ok = |v: f32| v.is_finite() && (0.0..=MAX_SIZE_MM).contains(&v);
             if !(ok(header_mm) && ok(footer_mm) && ok(row_mm) && row_mm >= 1.0) {
-				return Err("Header/row/footer height is invalid (row must be at least 1 mm)".into());
+                return Err("Header/row/footer height is invalid (row must be at least 1 mm)".into());
             }
             if !roll {
-                let fixed = header_mm + if footer == FooterMode::EveryPage { footer_mm } else { 0.0 };
+                let fixed = header_mm
+                    + if footer == FooterMode::EveryPage {
+                        footer_mm
+                    } else {
+                        0.0
+                    };
                 if fixed + row_mm > self.height_mm + 0.01 {
                     return Err(format!(
-						"header + row{} ({} mm) is taller than the page ({} mm)",
-                        if footer == FooterMode::EveryPage { " + footer" } else { "" },
+                        "header + row{} ({} mm) is taller than the page ({} mm)",
+                        if footer == FooterMode::EveryPage {
+                            " + footer"
+                        } else {
+                            ""
+                        },
                         fixed + row_mm,
                         self.height_mm
                     ));
                 }
                 if header_mm + row_mm + footer_mm > self.height_mm + 0.01 {
-					return Err("Header + row + footer is taller than the page".into());
+                    return Err("Header + row + footer is taller than the page".into());
                 }
             }
         }
@@ -348,11 +368,23 @@ struct ListPage {
 }
 
 /// Splits `n` rows into pages (pure layout math).
-fn paginate(n: usize, page_h: f32, header: f32, row: f32, footer_h: f32, mode: FooterMode, roll: bool) -> Vec<ListPage> {
+fn paginate(
+    n: usize,
+    page_h: f32,
+    header: f32,
+    row: f32,
+    footer_h: f32,
+    mode: FooterMode,
+    roll: bool,
+) -> Vec<ListPage> {
     const EPS: f32 = 0.01;
     if roll {
         let height = header + n as f32 * row + footer_h;
-        return vec![ListPage { rows: 0..n, footer_top: Some(header + n as f32 * row), height_mm: height }];
+        return vec![ListPage {
+            rows: 0..n,
+            footer_top: Some(header + n as f32 * row),
+            height_mm: height,
+        }];
     }
     let every = mode == FooterMode::EveryPage;
     let bottom = page_h - if every { footer_h } else { 0.0 };
@@ -378,7 +410,11 @@ fn paginate(n: usize, page_h: f32, header: f32, row: f32, footer_h: f32, mode: F
             last.footer_top = Some(after);
         } else {
             // No room left: the footer gets its own page, under the header.
-            pages.push(ListPage { rows: n..n, footer_top: Some(header), height_mm: page_h });
+            pages.push(ListPage {
+                rows: n..n,
+                footer_top: Some(header),
+                height_mm: page_h,
+            });
         }
     }
     pages
@@ -428,7 +464,7 @@ pub fn fill(s: &str, record: &Record) -> String {
 
 /// Converts a JSON object (strings, numbers, booleans, null) into a record.
 pub fn record_from_json(value: &serde_json::Value) -> Result<Record, String> {
-	let obj = value.as_object().ok_or("Each data item must be a JSON object")?;
+    let obj = value.as_object().ok_or("Each data item must be a JSON object")?;
     obj.iter()
         .map(|(k, v)| {
             let s = match v {
@@ -436,7 +472,7 @@ pub fn record_from_json(value: &serde_json::Value) -> Result<Record, String> {
                 serde_json::Value::Number(n) => n.to_string(),
                 serde_json::Value::Bool(b) => b.to_string(),
                 serde_json::Value::Null => String::new(),
-				_ => return Err(format!("Value '{}' must be text/number, not an object/array", k)),
+                _ => return Err(format!("Value '{}' must be text/number, not an object/array", k)),
             };
             Ok((k.clone(), s))
         })
@@ -479,8 +515,7 @@ fn draw_text(
     let mut lines = layout(size);
     if fit {
         let fits = |lines: &[String], size: f32| {
-            lines.len() as f32 * line_h(size) <= h + 0.01
-                && lines.iter().all(|l| c.measure(l, font, size) <= w + 0.01)
+            lines.len() as f32 * line_h(size) <= h + 0.01 && lines.iter().all(|l| c.measure(l, font, size) <= w + 0.01)
         };
         while size > 3.0 && !fits(&lines, size) {
             size = (size - 0.5).max(3.0);
@@ -519,7 +554,14 @@ fn draw_runs(c: &mut Canvas, row: &[bool], x: f32, y: f32, module: f32, height: 
             while i < row.len() && row[i] {
                 i += 1;
             }
-            c.rect(x + start as f32 * module, y, (i - start) as f32 * module, height, None, Some(0))?;
+            c.rect(
+                x + start as f32 * module,
+                y,
+                (i - start) as f32 * module,
+                height,
+                None,
+                Some(0),
+            )?;
         } else {
             i += 1;
         }
@@ -530,21 +572,71 @@ fn draw_runs(c: &mut Canvas, row: &[bool], x: f32, y: f32, module: f32, height: 
 fn draw_element(c: &mut Canvas, fonts: &Fonts, el: &Element, record: &Record) -> Result<(), String> {
     let pdf = |e: PdfiumError| e.to_string();
     match el {
-        Element::Text { x, y, w, h, text, size, bold, align, valign, wrap, fit, .. } => {
+        Element::Text {
+            x,
+            y,
+            w,
+            h,
+            text,
+            size,
+            bold,
+            align,
+            valign,
+            wrap,
+            fit,
+            ..
+        } => {
             let text = fill(text, record);
-            draw_text(c, fonts, &text, (*x, *y, *w, *h), *size, *bold, *align, *valign, *wrap, *fit).map_err(pdf)
+            draw_text(
+                c,
+                fonts,
+                &text,
+                (*x, *y, *w, *h),
+                *size,
+                *bold,
+                *align,
+                *valign,
+                *wrap,
+                *fit,
+            )
+            .map_err(pdf)
         }
-        Element::Line { x1, y1, x2, y2, width, .. } => c.line(*x1, *y1, *x2, *y2, *width, 0).map_err(pdf),
-        Element::Rect { x, y, w, h, stroke, fill: filled, .. } => c
-            .rect(*x, *y, *w, *h, (*stroke > 0.0).then_some((0, *stroke)), filled.then_some(0))
+        Element::Line {
+            x1, y1, x2, y2, width, ..
+        } => c.line(*x1, *y1, *x2, *y2, *width, 0).map_err(pdf),
+        Element::Rect {
+            x,
+            y,
+            w,
+            h,
+            stroke,
+            fill: filled,
+            ..
+        } => c
+            .rect(
+                *x,
+                *y,
+                *w,
+                *h,
+                (*stroke > 0.0).then_some((0, *stroke)),
+                filled.then_some(0),
+            )
             .map_err(pdf),
-        Element::Barcode { x, y, w, h, value, show_text, .. } => {
+        Element::Barcode {
+            x,
+            y,
+            w,
+            h,
+            value,
+            show_text,
+            ..
+        } => {
             let value = fill(value, record);
             if value.is_empty() {
                 return Ok(());
             }
             if !value.chars().all(|ch| (' '..='~').contains(&ch)) {
-				return Err(format!("Barcode '{}' may contain ASCII characters only", value));
+                return Err(format!("Barcode '{}' may contain ASCII characters only", value));
             }
             let modules = barcoders::sym::code128::Code128::new(format!("Ɓ{}", value))
                 .map_err(|e| format!("barcode '{}': {}", value, e))?
@@ -556,12 +648,32 @@ fn draw_element(c: &mut Canvas, fonts: &Fonts, el: &Element, record: &Record) ->
             draw_runs(c, &row, *x, *y, module, bars_h).map_err(pdf)?;
             if *show_text {
                 let size = mm_to_pt(text_h * 0.8);
-                draw_text(c, fonts, &value, (*x, y + bars_h, *w, text_h), size, false, HAlign::Center, VAlign::Middle, false, true)
-                    .map_err(pdf)?;
+                draw_text(
+                    c,
+                    fonts,
+                    &value,
+                    (*x, y + bars_h, *w, text_h),
+                    size,
+                    false,
+                    HAlign::Center,
+                    VAlign::Middle,
+                    false,
+                    true,
+                )
+                .map_err(pdf)?;
             }
             Ok(())
         }
-        Element::Image { x, y, w, h, src, fit, grayscale, .. } => {
+        Element::Image {
+            x,
+            y,
+            w,
+            h,
+            src,
+            fit,
+            grayscale,
+            ..
+        } => {
             let src = fill(src, record);
             if src.trim().is_empty() {
                 return Ok(());
@@ -618,7 +730,7 @@ fn decode_image(src: &str, grayscale: bool) -> Result<image::DynamicImage, Strin
     };
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(b64.trim())
-		.map_err(|_| "Image is not a valid data URL/base64 value".to_string())?;
+        .map_err(|_| "Image is not a valid data URL/base64 value".to_string())?;
     // Clients send these images: a small file claiming huge dimensions must not
     // be able to exhaust memory while decoding.
     let mut limits = image::Limits::default();
@@ -646,7 +758,9 @@ fn decode_image(src: &str, grayscale: bool) -> Result<image::DynamicImage, Strin
         }
         p[3] = 255;
     }
-    Ok(image::DynamicImage::ImageRgb8(image::DynamicImage::ImageRgba8(rgba).to_rgb8()))
+    Ok(image::DynamicImage::ImageRgb8(
+        image::DynamicImage::ImageRgba8(rgba).to_rgb8(),
+    ))
 }
 
 /// Values for one element: automatic fields, overridden by the shared header
@@ -665,9 +779,17 @@ fn values(header: &Record, record: Option<&Record>, auto: [(&str, usize); 4]) ->
 }
 
 /// Builds the PDF: one page per record (label) or rows paginated under a header (list).
-fn build<'a>(pdfium: &'a Pdfium, template: &Template, records: &[Record], header: &Record) -> Result<PdfDocument<'a>, String> {
+fn build<'a>(
+    pdfium: &'a Pdfium,
+    template: &Template,
+    records: &[Record],
+    header: &Record,
+) -> Result<PdfDocument<'a>, String> {
     let mut doc = pdfium.create_new_pdf().map_err(|e| e.to_string())?;
-    let fonts = Fonts { regular: doc.fonts_mut().helvetica(), bold: doc.fonts_mut().helvetica_bold() };
+    let fonts = Fonts {
+        regular: doc.fonts_mut().helvetica(),
+        bold: doc.fonts_mut().helvetica_bold(),
+    };
     let w = template.width_mm;
     let n = records.len();
     let err = |i: usize, e: String| format!("elemen #{}: {}", i + 1, e);
@@ -678,11 +800,29 @@ fn build<'a>(pdfium: &'a Pdfium, template: &Template, records: &[Record], header
             .iter()
             .enumerate()
             .map(|(p, r)| {
-                let v = values(header, Some(r), [("no", p + 1), ("halaman", p + 1), ("total_halaman", n), ("jumlah_data", n)]);
-                (template.height_mm, (0..template.elements.len()).map(|i| (i, 0.0, v.clone())).collect())
+                let v = values(
+                    header,
+                    Some(r),
+                    [
+                        ("no", p + 1),
+                        ("halaman", p + 1),
+                        ("total_halaman", n),
+                        ("jumlah_data", n),
+                    ],
+                );
+                (
+                    template.height_mm,
+                    (0..template.elements.len()).map(|i| (i, 0.0, v.clone())).collect(),
+                )
             })
             .collect(),
-        Layout::List { header_mm, row_mm, footer_mm, footer, roll } => {
+        Layout::List {
+            header_mm,
+            row_mm,
+            footer_mm,
+            footer,
+            roll,
+        } => {
             let band = |el: &Element| {
                 let top = el.top();
                 if top < header_mm - 0.001 {
@@ -699,7 +839,14 @@ fn build<'a>(pdfium: &'a Pdfium, template: &Template, records: &[Record], header
                 .iter()
                 .enumerate()
                 .map(|(p, page)| {
-                    let auto = |no: usize| [("no", no), ("halaman", p + 1), ("total_halaman", total), ("jumlah_data", n)];
+                    let auto = |no: usize| {
+                        [
+                            ("no", no),
+                            ("halaman", p + 1),
+                            ("total_halaman", total),
+                            ("jumlah_data", n),
+                        ]
+                    };
                     let shared = values(header, None, auto(0));
                     let mut items = Vec::new();
                     for (i, el) in template.elements.iter().enumerate() {
@@ -727,9 +874,17 @@ fn build<'a>(pdfium: &'a Pdfium, template: &Template, records: &[Record], header
     for (height, items) in pages {
         let page = doc
             .pages_mut()
-            .create_page_at_end(PdfPagePaperSize::Custom(PdfPoints::new(mm_to_pt(w)), PdfPoints::new(mm_to_pt(height))))
+            .create_page_at_end(PdfPagePaperSize::Custom(
+                PdfPoints::new(mm_to_pt(w)),
+                PdfPoints::new(mm_to_pt(height)),
+            ))
             .map_err(|e| e.to_string())?;
-        let mut c = Canvas { doc: &doc, page, width_mm: w, height_mm: height };
+        let mut c = Canvas {
+            doc: &doc,
+            page,
+            width_mm: w,
+            height_mm: height,
+        };
         for (i, dy, vals) in items {
             let el = &template.elements[i];
             let el = if dy == 0.0 { el.clone() } else { el.shifted(dy) };
@@ -744,23 +899,32 @@ fn build<'a>(pdfium: &'a Pdfium, template: &Template, records: &[Record], header
 pub fn render(path: &Path, template: &Template, records: &[Record], header: &Record) -> Result<(), String> {
     template.validate()?;
     if records.is_empty() {
-		return Err("Data is empty: send at least one record".into());
+        return Err("Data is empty: send at least one record".into());
     }
     if records.len() > MAX_RECORDS {
         return Err(format!("maksimal {} record per job", MAX_RECORDS));
     }
     let pdfium = pdfium()?;
     let doc = build(&pdfium, template, records, header)?;
-    doc.save_to_file(path).map_err(|e| format!("Gagal menyimpan PDF template: {}", e))
+    doc.save_to_file(path)
+        .map_err(|e| format!("Gagal menyimpan PDF template: {}", e))
 }
 
 /// The first `max_pages` printed pages as PNGs, for a print preview.
-pub fn pages_png(template: &Template, records: &[Record], header: &Record, max_pages: usize, px_per_mm: f32) -> Result<(Vec<Vec<u8>>, usize), String> {
+pub fn pages_png(
+    template: &Template,
+    records: &[Record],
+    header: &Record,
+    max_pages: usize,
+    px_per_mm: f32,
+) -> Result<(Vec<Vec<u8>>, usize), String> {
     template.validate()?;
     let pdfium = pdfium()?;
     let doc = build(&pdfium, template, records, header)?;
     let total = doc.pages().len() as usize;
-    let pages = (0..total.min(max_pages)).map(|i| render_page_png(&doc, i, px_per_mm)).collect::<Result<_, _>>()?;
+    let pages = (0..total.min(max_pages))
+        .map(|i| render_page_png(&doc, i, px_per_mm))
+        .collect::<Result<_, _>>()?;
     Ok((pages, total))
 }
 
@@ -769,8 +933,20 @@ pub fn pages_png(template: &Template, records: &[Record], header: &Record, max_p
 pub fn preview_png(template: &Template, record: &Record, px_per_mm: f32) -> Result<Vec<u8>, String> {
     template.validate()?;
     let mut t = template.clone();
-    if let Layout::List { header_mm, row_mm, footer_mm, .. } = t.layout {
-        t.layout = Layout::List { header_mm, row_mm, footer_mm, footer: FooterMode::LastPage, roll: true };
+    if let Layout::List {
+        header_mm,
+        row_mm,
+        footer_mm,
+        ..
+    } = t.layout
+    {
+        t.layout = Layout::List {
+            header_mm,
+            row_mm,
+            footer_mm,
+            footer: FooterMode::LastPage,
+            roll: true,
+        };
     }
     let pdfium = pdfium()?;
     let doc = build(&pdfium, &t, std::slice::from_ref(record), record)?;
@@ -779,8 +955,12 @@ pub fn preview_png(template: &Template, record: &Record, px_per_mm: f32) -> Resu
 
 pub(crate) fn render_page_png(doc: &PdfDocument, index: usize, px_per_mm: f32) -> Result<Vec<u8>, String> {
     let page = doc.pages().get(index as PdfPageIndex).map_err(|e| e.to_string())?;
-    let w = (crate::settings::pt_to_mm(page.width().value) * px_per_mm).round().clamp(1.0, 4000.0) as i32;
-    let h = (crate::settings::pt_to_mm(page.height().value) * px_per_mm).round().clamp(1.0, 4000.0) as i32;
+    let w = (crate::settings::pt_to_mm(page.width().value) * px_per_mm)
+        .round()
+        .clamp(1.0, 4000.0) as i32;
+    let h = (crate::settings::pt_to_mm(page.height().value) * px_per_mm)
+        .round()
+        .clamp(1.0, 4000.0) as i32;
     let rgba = page
         .render_with_config(&PdfRenderConfig::new().set_fixed_size(w, h))
         .map_err(|e| e.to_string())?
@@ -805,7 +985,11 @@ mod tests {
     fn half_red(format: image::ImageFormat) -> String {
         use base64::Engine;
         let img = image::RgbaImage::from_fn(4, 4, |x, _| {
-            if x < 2 { image::Rgba([255, 0, 0, 255]) } else { image::Rgba([0, 0, 0, 0]) }
+            if x < 2 {
+                image::Rgba([255, 0, 0, 255])
+            } else {
+                image::Rgba([0, 0, 0, 0])
+            }
         });
         let img = if format == image::ImageFormat::Jpeg {
             image::DynamicImage::ImageRgb8(image::DynamicImage::ImageRgba8(img).to_rgb8())
@@ -814,7 +998,10 @@ mod tests {
         };
         let mut bytes = std::io::Cursor::new(Vec::new());
         img.write_to(&mut bytes, format).unwrap();
-        format!("data:image/x;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes.into_inner()))
+        format!(
+            "data:image/x;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes.into_inner())
+        )
     }
 
     fn sample() -> Template {
@@ -842,7 +1029,10 @@ mod tests {
         let t = sample();
         assert_eq!(t.fields(), vec!["nama", "rm", "unknown"]);
         let r = record(&[("nama", "Chandra AP"), ("rm", "303030")]);
-        assert_eq!(fill("Nama: {{nama}}, RM {{ rm }}{{x}}", &r), "Nama: Chandra AP, RM 303030");
+        assert_eq!(
+            fill("Nama: {{nama}}, RM {{ rm }}{{x}}", &r),
+            "Nama: Chandra AP, RM 303030"
+        );
         assert_eq!(fill("{{ bad name }} {{", &r), "{{ bad name }} {{");
         let from_json = record_from_json(&serde_json::json!({"a": 1, "b": true, "c": null, "d": "x"})).unwrap();
         assert_eq!(from_json, record(&[("a", "1"), ("b", "true"), ("c", ""), ("d", "x")]));
@@ -855,7 +1045,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ixprint-tpl-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let t = sample();
-        let records = vec![record(&[("nama", "A"), ("rm", "1001")]), record(&[("nama", "B"), ("rm", "1002")])];
+        let records = vec![
+            record(&[("nama", "A"), ("rm", "1001")]),
+            record(&[("nama", "B"), ("rm", "1002")]),
+        ];
         let path = dir.join("t.pdf");
         render(&path, &t, &records, &Record::new()).unwrap();
         {
@@ -872,7 +1065,9 @@ mod tests {
 
         // Non-ASCII barcode is a clear error, not a crash.
         let r = record(&[("rm", "é")]);
-        assert!(render(&dir.join("bad.pdf"), &t, &[r], &Record::new()).unwrap_err().contains("ASCII"));
+        assert!(render(&dir.join("bad.pdf"), &t, &[r], &Record::new())
+            .unwrap_err()
+            .contains("ASCII"));
         // Long text shrinks to fit instead of overflowing.
         let long = record(&[("nama", &"Nama Sangat Panjang ".repeat(10)), ("rm", "1")]);
         render(&dir.join("long.pdf"), &t, &[long], &Record::new()).unwrap();
@@ -904,10 +1099,20 @@ mod tests {
             let img = image::load_from_memory(&png).unwrap().to_rgb8();
             let left = img.get_pixel(10, 40);
             let right = img.get_pixel(70, 40);
-            assert!(left[0] > 200 && left[1] < 80, "{:?}: left should be red, got {:?}", f, left);
+            assert!(
+                left[0] > 200 && left[1] < 80,
+                "{:?}: left should be red, got {:?}",
+                f,
+                left
+            );
             // Transparency becomes white, not black.
             if f != image::ImageFormat::Jpeg {
-                assert!(right[0] > 200 && right[1] > 200 && right[2] > 200, "{:?}: right should be white, got {:?}", f, right);
+                assert!(
+                    right[0] > 200 && right[1] > 200 && right[2] > 200,
+                    "{:?}: right should be white, got {:?}",
+                    f,
+                    right
+                );
             }
         }
         // Grayscale option and per-record images via a {{field}}.
@@ -919,22 +1124,27 @@ mod tests {
         assert_eq!(t.fields(), vec!["foto"]);
         let mut r = Record::new();
         r.insert("foto".into(), half_red(image::ImageFormat::Png));
-        let img = image::load_from_memory(&preview_png(&t, &r, 4.0).unwrap()).unwrap().to_rgb8();
+        let img = image::load_from_memory(&preview_png(&t, &r, 4.0).unwrap())
+            .unwrap()
+            .to_rgb8();
         let p = img.get_pixel(10, 40);
         assert!(p[0] == p[1] && p[1] == p[2], "grayscale expected, got {:?}", p);
         // Garbage is a clear error.
         r.insert("foto".into(), "data:image/png;base64,bm90IGFuIGltYWdl".into());
-		assert!(preview_png(&t, &r, 4.0).unwrap_err().contains("Image"));
+        assert!(preview_png(&t, &r, 4.0).unwrap_err().contains("Image"));
     }
 
     #[test]
     fn paginates_lists() {
         // 100 mm page, 20 header, 10 per row → 8 rows per page.
         let p = paginate(20, 100.0, 20.0, 10.0, 15.0, FooterMode::LastPage, false);
-        assert_eq!(p.iter().map(|x| x.rows.clone()).collect::<Vec<_>>(), vec![0..8, 8..16, 16..20]);
+        assert_eq!(
+            p.iter().map(|x| x.rows.clone()).collect::<Vec<_>>(),
+            vec![0..8, 8..16, 16..20]
+        );
         assert_eq!(p[0].footer_top, None);
         assert_eq!(p[2].footer_top, Some(60.0)); // right after the 4 rows
-        // Footer that doesn't fit after the last row gets its own page.
+                                                 // Footer that doesn't fit after the last row gets its own page.
         let p = paginate(8, 100.0, 20.0, 10.0, 15.0, FooterMode::LastPage, false);
         assert_eq!(p.len(), 2);
         assert_eq!((p[1].rows.clone(), p[1].footer_top), (8..8, Some(20.0)));
@@ -961,8 +1171,14 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(t.fields(), vec!["nama", "total", "unit"]);
-        let records: Vec<Record> = (1..=7).map(|i| [("nama".to_string(), format!("Pasien{}", i))].into()).collect();
-        let header: Record = [("unit".to_string(), "Anak".to_string()), ("total".to_string(), "Rp9".to_string())].into();
+        let records: Vec<Record> = (1..=7)
+            .map(|i| [("nama".to_string(), format!("Pasien{}", i))].into())
+            .collect();
+        let header: Record = [
+            ("unit".to_string(), "Anak".to_string()),
+            ("total".to_string(), "Rp9".to_string()),
+        ]
+        .into();
 
         let pdfium = pdfium().unwrap();
         let doc = build(&pdfium, &t, &records, &header).unwrap();
@@ -970,7 +1186,12 @@ mod tests {
         assert_eq!(doc.pages().len(), 2);
         let text = |i: i32| doc.pages().get(i).unwrap().text().unwrap().all();
         let (p1, p2) = (text(0), text(1));
-        assert!(p1.contains("Unit Anak hal 1/2") && p2.contains("Unit Anak hal 2/2"), "{}\n---\n{}", p1, p2);
+        assert!(
+            p1.contains("Unit Anak hal 1/2") && p2.contains("Unit Anak hal 2/2"),
+            "{}\n---\n{}",
+            p1,
+            p2
+        );
         assert!(p1.contains("1. Pasien1") && p1.contains("5. Pasien5") && !p1.contains("Pasien6"));
         assert!(p2.contains("6. Pasien6") && p2.contains("7. Pasien7"));
         assert!(!p1.contains("Total") && p2.contains("Total 7 Rp9"));
@@ -978,8 +1199,11 @@ mod tests {
         drop(doc);
         if let Ok(out) = std::env::var("IXPRINT_VISUAL_OUT") {
             let mut framed = t.clone();
-            framed.elements.push(serde_json::from_value(serde_json::json!(
-                { "type": "line", "x1": 0, "y1": 14.5, "x2": 80, "y2": 14.5, "width": 0.5 })).unwrap());
+            framed.elements.push(
+                serde_json::from_value(serde_json::json!(
+                { "type": "line", "x1": 0, "y1": 14.5, "x2": 80, "y2": 14.5, "width": 0.5 }))
+                .unwrap(),
+            );
             // Reuses the lock held by `pdfium` above (it is not re-entrant).
             let doc = build(&pdfium, &framed, &records, &header).unwrap();
             for i in 0..doc.pages().len() as usize {
@@ -992,22 +1216,43 @@ mod tests {
         label.layout = Layout::Label;
         let doc = build(&pdfium, &label, &records[..2], &header).unwrap();
         assert_eq!(doc.pages().len(), 2);
-        assert!(doc.pages().get(1).unwrap().text().unwrap().all().contains("Unit Anak hal 2/2"));
+        assert!(doc
+            .pages()
+            .get(1)
+            .unwrap()
+            .text()
+            .unwrap()
+            .all()
+            .contains("Unit Anak hal 2/2"));
 
         // User values win over automatic ones.
         let mut numbered = records[..2].to_vec();
         numbered[1].insert("no".into(), "B-02".into());
         numbered[0].insert("no".into(), String::new()); // empty = automatic
-        let custom_header: Record = [("unit".to_string(), "Anak".to_string()), ("total_halaman".to_string(), "9".to_string())].into();
+        let custom_header: Record = [
+            ("unit".to_string(), "Anak".to_string()),
+            ("total_halaman".to_string(), "9".to_string()),
+        ]
+        .into();
         let doc = build(&pdfium, &t, &numbered, &custom_header).unwrap();
         let p1 = doc.pages().get(0).unwrap().text().unwrap().all();
-        assert!(p1.contains("1. Pasien1") && p1.contains("B-02. Pasien2") && p1.contains("hal 1/9"), "{}", p1);
+        assert!(
+            p1.contains("1. Pasien1") && p1.contains("B-02. Pasien2") && p1.contains("hal 1/9"),
+            "{}",
+            p1
+        );
         assert_eq!(t.auto_fields(), vec!["halaman", "jumlah_data", "no", "total_halaman"]);
         drop(doc);
 
         // Too-tall bands are rejected.
         let mut bad = t.clone();
-        bad.layout = Layout::List { header_mm: 50.0, row_mm: 20.0, footer_mm: 0.0, footer: FooterMode::LastPage, roll: false };
+        bad.layout = Layout::List {
+            header_mm: 50.0,
+            row_mm: 20.0,
+            footer_mm: 0.0,
+            footer: FooterMode::LastPage,
+            roll: false,
+        };
         assert!(bad.validate().is_err());
     }
 

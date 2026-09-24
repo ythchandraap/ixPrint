@@ -17,19 +17,11 @@ pub const MAX_TEST_PAGES: u32 = 50;
 /// Writes a calibration PDF of `pages` pages, each `width_mm` × `height_mm`.
 /// `info` lines (paper, printer, preset, ...) are printed under the title; with
 /// several pages each is numbered, so feed drift between labels shows up.
-pub fn generate(
-    path: &Path,
-    width_mm: f32,
-    height_mm: f32,
-    info: &[String],
-    pages: u32,
-) -> Result<(), String> {
+pub fn generate(path: &Path, width_mm: f32, height_mm: f32, info: &[String], pages: u32) -> Result<(), String> {
     let pages = pages.clamp(1, MAX_TEST_PAGES);
     let run = || -> Result<(), PdfiumError> {
         let pdfium = pdfium().map_err(|_| {
-            PdfiumError::PdfiumLibraryInternalError(
-                pdfium_render::prelude::PdfiumInternalError::Unknown,
-            )
+            PdfiumError::PdfiumLibraryInternalError(pdfium_render::prelude::PdfiumInternalError::Unknown)
         })?;
         let mut doc = pdfium.create_new_pdf()?;
         let regular = doc.fonts_mut().helvetica();
@@ -37,14 +29,12 @@ pub fn generate(
         for number in 1..=pages {
             let mut info = info.to_vec();
             if pages > 1 {
-				info.insert(0, format!("Page {} of {}", number, pages));
+                info.insert(0, format!("Page {} of {}", number, pages));
             }
-            let page = doc
-                .pages_mut()
-                .create_page_at_end(PdfPagePaperSize::Custom(
-                    PdfPoints::new(mm_to_pt(width_mm)),
-                    PdfPoints::new(mm_to_pt(height_mm)),
-                ))?;
+            let page = doc.pages_mut().create_page_at_end(PdfPagePaperSize::Custom(
+                PdfPoints::new(mm_to_pt(width_mm)),
+                PdfPoints::new(mm_to_pt(height_mm)),
+            ))?;
             let mut c = Canvas {
                 doc: &doc,
                 page,
@@ -62,14 +52,7 @@ pub fn generate(
             // Guides 5 mm and 10 mm from every edge.
             for (inset, gray) in [(5.0, 150u8), (10.0, 190u8)] {
                 if w > inset * 3.0 && h > inset * 3.0 {
-                    c.rect(
-                        inset,
-                        inset,
-                        w - 2.0 * inset,
-                        h - 2.0 * inset,
-                        Some((gray, 0.3)),
-                        None,
-                    )?;
+                    c.rect(inset, inset, w - 2.0 * inset, h - 2.0 * inset, Some((gray, 0.3)), None)?;
                 }
             }
 
@@ -116,7 +99,7 @@ pub fn generate(
             // Text block between the strips, skipping the band of the side rulers.
             let margin = if w > 30.0 { 6.0 } else { 2.0 };
             let text_w = w - 2.0 * margin;
-			let title = "ix.print · Paper Edge Test";
+            let title = "ix.print · Paper Edge Test";
             let fit = |size: f32| c.measure(title, bold, size) <= text_w;
             let mut title_size = 16.0f32;
             while title_size > 5.0 && !fit(title_size) {
@@ -124,22 +107,17 @@ pub fn generate(
             }
             let body = (title_size * 0.62).clamp(4.5, 10.0);
             let line_h = |size: f32| crate::settings::pt_to_mm(size) * 1.35;
-            let limit = if bottom > top {
-                bottom - 1.0
-            } else {
-                h - ruler - 1.0
-            };
+            let limit = if bottom > top { bottom - 1.0 } else { h - ruler - 1.0 };
             let mid_band = (h / 2.0 - 3.0, h / 2.0 + 4.0);
 
             // Paragraphs are kept whole: one that would cross the side rulers moves below them.
-            let mut paragraphs: Vec<Vec<(String, PdfFontToken, f32)>> =
-                vec![vec![(title.into(), bold, title_size)]];
+            let mut paragraphs: Vec<Vec<(String, PdfFontToken, f32)>> = vec![vec![(title.into(), bold, title_size)]];
             let tips = [
-			"The outer black line marks the paper edge.",
-			"The first visible ruler number on each side shows the millimetres clipped on that side.",
-			"The grey lines mark 5 mm and 10 mm from the edge.",
-			"Not symmetrical? Adjust the X/Y offsets in the preset.",
-        ];
+                "The outer black line marks the paper edge.",
+                "The first visible ruler number on each side shows the millimetres clipped on that side.",
+                "The grey lines mark 5 mm and 10 mm from the edge.",
+                "Not symmetrical? Adjust the X/Y offsets in the preset.",
+            ];
             for text in info.iter().map(String::as_str).chain(tips) {
                 paragraphs.push(
                     wrap(&c, text, regular, body, text_w)
@@ -168,14 +146,7 @@ pub fn generate(
             // Outer frame last so nothing covers it; inset by half the stroke to sit on the edge.
             let stroke = 0.8;
             let inset = crate::settings::pt_to_mm(stroke / 2.0);
-            c.rect(
-                inset,
-                inset,
-                w - 2.0 * inset,
-                h - 2.0 * inset,
-                Some((0, stroke)),
-                None,
-            )?;
+            c.rect(inset, inset, w - 2.0 * inset, h - 2.0 * inset, Some((0, stroke)), None)?;
 
             c.page.regenerate_content()?;
             drop(c);
@@ -183,7 +154,7 @@ pub fn generate(
         doc.save_to_file(path)?;
         Ok(())
     };
-	run().map_err(|e| format!("Failed to create the test page: {}", e))
+    run().map_err(|e| format!("Failed to create the test page: {}", e))
 }
 
 #[cfg(test)]
@@ -212,7 +183,7 @@ mod tests {
             let doc = pdfium.load_pdf_from_file(&multi, None).unwrap();
             assert_eq!(doc.pages().len(), 3);
             let text = doc.pages().get(2).unwrap().text().unwrap().all();
-			assert!(text.contains("Page 3 of 3"), "{}", text);
+            assert!(text.contains("Page 3 of 3"), "{}", text);
         }
         if let Ok(out) = std::env::var("IXPRINT_VISUAL_OUT") {
             for entry in std::fs::read_dir(&dir).unwrap().flatten() {

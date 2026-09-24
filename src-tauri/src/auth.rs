@@ -27,10 +27,10 @@ pub struct ApiToken {
 pub fn generate(name: &str) -> Result<(String, ApiToken), String> {
     let name = name.trim();
     if name.is_empty() {
-		return Err("Token name cannot be empty".into());
+        return Err("Token name cannot be empty".into());
     }
     if name.chars().count() > MAX_NAME {
-		return Err(format!("Token name must be at most {} characters", MAX_NAME));
+        return Err(format!("Token name must be at most {} characters", MAX_NAME));
     }
     // Two v4 UUIDs = 244 random bits from the OS generator.
     let token = format!(
@@ -60,9 +60,13 @@ pub fn hash(token: &str) -> String {
 /// in constant time, so response timing reveals nothing about the tokens.
 pub fn find<'a>(tokens: &'a [ApiToken], provided: &str) -> Option<&'a ApiToken> {
     let h = hash(provided);
-    tokens
-        .iter()
-        .fold(None, |found, t| if ct_eq(t.hash.as_bytes(), h.as_bytes()) { Some(t) } else { found })
+    tokens.iter().fold(None, |found, t| {
+        if ct_eq(t.hash.as_bytes(), h.as_bytes()) {
+            Some(t)
+        } else {
+            found
+        }
+    })
 }
 
 pub(crate) fn ct_eq(a: &[u8], b: &[u8]) -> bool {
@@ -83,14 +87,23 @@ impl FailedAttempts {
     pub fn locked(&self, ip: IpAddr) -> Option<Duration> {
         let map = self.0.lock().unwrap();
         let (count, since) = map.get(&ip)?;
-        (*count >= MAX_FAILURES).then(|| LOCKOUT.saturating_sub(since.elapsed())).filter(|d| !d.is_zero())
+        (*count >= MAX_FAILURES)
+            .then(|| LOCKOUT.saturating_sub(since.elapsed()))
+            .filter(|d| !d.is_zero())
     }
 
     pub fn fail(&self, ip: IpAddr) {
         let mut map = self.0.lock().unwrap();
         let now = Instant::now();
         // Keep the map small: forget clients whose window or lockout has passed.
-        map.retain(|_, (count, since)| since.elapsed() < if *count >= MAX_FAILURES { LOCKOUT } else { FAILURE_WINDOW });
+        map.retain(|_, (count, since)| {
+            since.elapsed()
+                < if *count >= MAX_FAILURES {
+                    LOCKOUT
+                } else {
+                    FAILURE_WINDOW
+                }
+        });
         let entry = map.entry(ip).or_insert((0, now));
         entry.0 += 1;
         if entry.0 == MAX_FAILURES {
@@ -132,7 +145,10 @@ impl TokenUsage {
     pub fn record(&self, id: &str, client: Option<String>) {
         self.0.lock().unwrap().insert(
             id.to_string(),
-            TokenUse { time: chrono::Local::now().to_rfc3339(), client },
+            TokenUse {
+                time: chrono::Local::now().to_rfc3339(),
+                client,
+            },
         );
     }
 

@@ -57,7 +57,7 @@ impl FromStr for Orientation {
             "portrait" => Ok(Self::Portrait),
             "landscape" => Ok(Self::Landscape),
             "auto" => Ok(Self::Auto),
-			_ => Err(format!("Orientation '{}' is invalid (portrait, landscape, auto)", s)),
+            _ => Err(format!("Orientation '{}' is invalid (portrait, landscape, auto)", s)),
         }
     }
 }
@@ -92,8 +92,13 @@ pub enum Paper {
     /// One of [`STANDARD_PAPERS`].
     Standard(&'static str),
     /// Continuous roll (receipt printers): fixed width, length follows the content.
-    Roll { width_mm: f32 },
-    Custom { width_mm: f32, height_mm: f32 },
+    Roll {
+        width_mm: f32,
+    },
+    Custom {
+        width_mm: f32,
+        height_mm: f32,
+    },
 }
 
 impl Paper {
@@ -143,15 +148,12 @@ impl FromStr for Paper {
         if lower.is_empty() || lower == "default" {
             return Ok(Paper::PrinterDefault);
         }
-        if let Some(&(name, _, _)) = STANDARD_PAPERS
-            .iter()
-            .find(|(n, _, _)| n.eq_ignore_ascii_case(&lower))
-        {
+        if let Some(&(name, _, _)) = STANDARD_PAPERS.iter().find(|(n, _, _)| n.eq_ignore_ascii_case(&lower)) {
             return Ok(Paper::Standard(name));
         }
         let invalid = || {
             format!(
-				"Paper '{}' is invalid (default, A4, Letter, ..., roll '80mm', custom '100x150mm')",
+                "Paper '{}' is invalid (default, A4, Letter, ..., roll '80mm', custom '100x150mm')",
                 s
             )
         };
@@ -213,14 +215,14 @@ impl FromStr for Scale {
             "fit" => Ok(Self::Fit),
             "none" | "actual" => Ok(Self::None),
             _ => {
-                let v: f32 = t
-                    .trim_end_matches('%')
-                    .trim()
-                    .replace(',', ".")
-                    .parse()
-				.map_err(|_| format!("Scale '{}' is invalid (shrink, fit, none, or a percentage such as 90)", s))?;
+                let v: f32 = t.trim_end_matches('%').trim().replace(',', ".").parse().map_err(|_| {
+                    format!(
+                        "Scale '{}' is invalid (shrink, fit, none, or a percentage such as 90)",
+                        s
+                    )
+                })?;
                 if !(1.0..=1000.0).contains(&v) {
-					return Err(format!("Scale {}% is outside the 1–1000 range", v));
+                    return Err(format!("Scale {}% is outside the 1–1000 range", v));
                 }
                 Ok(Self::Percent(v))
             }
@@ -254,7 +256,7 @@ impl FromStr for Align {
             "center" => Ok(Self::Center),
             "top" => Ok(Self::Top),
             "top-left" => Ok(Self::TopLeft),
-			_ => Err(format!("Alignment '{}' is invalid (center, top, top-left)", s)),
+            _ => Err(format!("Alignment '{}' is invalid (center, top, top-left)", s)),
         }
     }
 }
@@ -283,16 +285,31 @@ impl FromStr for Margins {
     type Err = String;
     /// CSS-like: `5` (all), `5,3` (vertical, horizontal) or `5,3,5,3` (top, right, bottom, left).
     fn from_str(s: &str) -> Result<Self, String> {
-		let invalid = || format!("Margins '{}' are invalid (e.g. 5, 5,3 or 5,3,5,3 in mm)", s);
+        let invalid = || format!("Margins '{}' are invalid (e.g. 5, 5,3 or 5,3,5,3 in mm)", s);
         let v: Vec<f32> = s
             .split(|c| c == ',' || c == ' ')
             .filter(|p| !p.is_empty())
             .map(|p| parse_length_mm(p).ok_or_else(invalid))
             .collect::<Result<_, _>>()?;
         match v.as_slice() {
-            [a] => Ok(Margins { top: *a, right: *a, bottom: *a, left: *a }),
-            [vert, hor] => Ok(Margins { top: *vert, right: *hor, bottom: *vert, left: *hor }),
-            [t, r, b, l] => Ok(Margins { top: *t, right: *r, bottom: *b, left: *l }),
+            [a] => Ok(Margins {
+                top: *a,
+                right: *a,
+                bottom: *a,
+                left: *a,
+            }),
+            [vert, hor] => Ok(Margins {
+                top: *vert,
+                right: *hor,
+                bottom: *vert,
+                left: *hor,
+            }),
+            [t, r, b, l] => Ok(Margins {
+                top: *t,
+                right: *r,
+                bottom: *b,
+                left: *l,
+            }),
             _ => Err(invalid()),
         }
     }
@@ -300,13 +317,25 @@ impl FromStr for Margins {
 
 impl fmt::Display for Margins {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let Margins { top, right, bottom, left } = *self;
+        let Margins {
+            top,
+            right,
+            bottom,
+            left,
+        } = *self;
         if top == right && right == bottom && bottom == left {
             write!(f, "{}", fmt_num(top))
         } else if top == bottom && left == right {
             write!(f, "{},{}", fmt_num(top), fmt_num(right))
         } else {
-            write!(f, "{},{},{},{}", fmt_num(top), fmt_num(right), fmt_num(bottom), fmt_num(left))
+            write!(
+                f,
+                "{},{},{},{}",
+                fmt_num(top),
+                fmt_num(right),
+                fmt_num(bottom),
+                fmt_num(left)
+            )
         }
     }
 }
@@ -335,7 +364,7 @@ impl PageRange {
 impl FromStr for PageRange {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, String> {
-		let invalid = || format!("Pages '{}' are invalid (e.g. 1-3,5,8-)", s);
+        let invalid = || format!("Pages '{}' are invalid (e.g. 1-3,5,8-)", s);
         let mut ranges = Vec::new();
         for part in s.split(',').map(str::trim).filter(|p| !p.is_empty()) {
             let range = match part.split_once('-') {
@@ -394,7 +423,7 @@ impl FromStr for Duplex {
             "off" | "none" | "simplex" => Ok(Self::Off),
             "long-edge" | "long" => Ok(Self::LongEdge),
             "short-edge" | "short" => Ok(Self::ShortEdge),
-			_ => Err(format!("Duplex '{}' is invalid (off, long-edge, short-edge)", s)),
+            _ => Err(format!("Duplex '{}' is invalid (off, long-edge, short-edge)", s)),
         }
     }
 }
@@ -422,7 +451,7 @@ impl FromStr for ColorMode {
         match s.trim().to_ascii_lowercase().as_str() {
             "color" | "colour" => Ok(Self::Color),
             "grayscale" | "greyscale" | "mono" | "monochrome" => Ok(Self::Grayscale),
-			_ => Err(format!("Colour '{}' is invalid (color, grayscale)", s)),
+            _ => Err(format!("Colour '{}' is invalid (color, grayscale)", s)),
         }
     }
 }
@@ -488,8 +517,21 @@ impl PrintSettings {
             ($($f:ident),*) => { PrintSettings { $($f: over.$f.clone().or_else(|| self.$f.clone()),)* } };
         }
         pick!(
-            printer, copies, collate, orientation, paper, scale, align, margins, offset_x,
-            offset_y, pages, duplex, color, tray, dpi
+            printer,
+            copies,
+            collate,
+            orientation,
+            paper,
+            scale,
+            align,
+            margins,
+            offset_x,
+            offset_y,
+            pages,
+            duplex,
+            color,
+            tray,
+            dpi
         )
     }
 
@@ -512,7 +554,7 @@ impl PrintSettings {
         }
         if let Some(p) = &self.printer {
             if p.trim().is_empty() {
-				return Err("Printer name cannot be empty".into());
+                return Err("Printer name cannot be empty".into());
             }
         }
         if let Some(paper) = &self.paper {
@@ -644,20 +686,36 @@ mod tests {
         assert_eq!("roll:58".parse::<Paper>().unwrap(), Paper::Roll { width_mm: 58.0 });
         assert_eq!(
             "100x150mm".parse::<Paper>().unwrap(),
-            Paper::Custom { width_mm: 100.0, height_mm: 150.0 }
+            Paper::Custom {
+                width_mm: 100.0,
+                height_mm: 150.0
+            }
         );
         assert_eq!(
             "4x6in".parse::<Paper>().unwrap(),
-            Paper::Custom { width_mm: 101.6, height_mm: 152.4 }
+            Paper::Custom {
+                width_mm: 101.6,
+                height_mm: 152.4
+            }
         );
         assert!("banana".parse::<Paper>().is_err());
-        assert_eq!(Paper::Custom { width_mm: 100.0, height_mm: 150.0 }.to_string(), "100x150mm");
+        assert_eq!(
+            Paper::Custom {
+                width_mm: 100.0,
+                height_mm: 150.0
+            }
+            .to_string(),
+            "100x150mm"
+        );
     }
 
     #[test]
     fn validate_rejects_oversized_custom_paper() {
         let settings = PrintSettings {
-            paper: Some(Paper::Custom { width_mm: 50000.0, height_mm: 50000.0 }),
+            paper: Some(Paper::Custom {
+                width_mm: 50000.0,
+                height_mm: 50000.0,
+            }),
             ..Default::default()
         };
         assert!(settings.validate().unwrap_err().contains("must be between"));
@@ -669,7 +727,12 @@ mod tests {
         assert_eq!("fit".parse::<Scale>().unwrap(), Scale::Fit);
         assert_eq!(
             "5,3".parse::<Margins>().unwrap(),
-            Margins { top: 5.0, right: 3.0, bottom: 5.0, left: 3.0 }
+            Margins {
+                top: 5.0,
+                right: 3.0,
+                bottom: 5.0,
+                left: 3.0
+            }
         );
         let pages: PageRange = "1-3,5,8-".parse().unwrap();
         assert_eq!(pages.indexes(9), vec![0, 1, 2, 4, 7, 8]);
@@ -705,9 +768,11 @@ mod tests {
 
     #[test]
     fn json_roundtrip_rejects_unknown() {
-        let s: PrintSettings =
-            serde_json::from_str(r#"{"paper":"80mm","scale":"90%","margins":"2"}"#).unwrap();
-        assert_eq!(serde_json::to_string(&s).unwrap(), r#"{"paper":"80mm","scale":"90%","margins":"2"}"#);
+        let s: PrintSettings = serde_json::from_str(r#"{"paper":"80mm","scale":"90%","margins":"2"}"#).unwrap();
+        assert_eq!(
+            serde_json::to_string(&s).unwrap(),
+            r#"{"paper":"80mm","scale":"90%","margins":"2"}"#
+        );
         assert!(serde_json::from_str::<PrintSettings>(r#"{"papr":"A4"}"#).is_err());
         assert!(serde_json::from_str::<PrintSettings>(r#"{"paper":"A9"}"#).is_err());
     }

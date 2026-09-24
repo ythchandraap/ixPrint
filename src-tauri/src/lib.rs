@@ -43,7 +43,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     let bridge_item = CheckMenuItem::with_id(
         app,
         "bridge-toggle",
-		"Application bridge",
+        "Application bridge",
         true,
         state.config.get().bridge_enabled,
         None::<&str>,
@@ -51,16 +51,16 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     let autostart_item = CheckMenuItem::with_id(
         app,
         "autostart-toggle",
-		"Run at login",
+        "Run at login",
         true,
         app.autolaunch().is_enabled().unwrap_or(false),
         None::<&str>,
     )?;
-	let printers_item = MenuItem::with_id(app, "view-printers", "View printers", true, None::<&str>)?;
+    let printers_item = MenuItem::with_id(app, "view-printers", "View printers", true, None::<&str>)?;
     let history_item = MenuItem::with_id(app, "view-history", "View history log", true, None::<&str>)?;
-	let errors_item = MenuItem::with_id(app, "view-errors", "View error log", true, None::<&str>)?;
-	let open_item = MenuItem::with_id(app, "open", "Open ix.print", true, None::<&str>)?;
-	let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let errors_item = MenuItem::with_id(app, "view-errors", "View error log", true, None::<&str>)?;
+    let open_item = MenuItem::with_id(app, "open", "Open ix.print", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let separator2 = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(
@@ -71,7 +71,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
             &separator,
             &printers_item,
             &history_item,
-			&errors_item,
+            &errors_item,
             &open_item,
             &separator2,
             &quit_item,
@@ -108,7 +108,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
             }
             "view-printers" => focus_main(app, Some("printers")),
             "view-history" => focus_main(app, Some("history")),
-			"view-errors" => focus_main(app, Some("errors")),
+            "view-errors" => focus_main(app, Some("errors")),
             "open" => focus_main(app, None),
             "quit" => app.exit(0),
             _ => {}

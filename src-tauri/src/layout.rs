@@ -43,11 +43,11 @@ pub fn init(candidate_dirs: &[PathBuf]) -> Result<(), String> {
                 if path.exists() {
                     return Pdfium::bind_to_library(&path)
                         .map(Pdfium::new)
-						.map_err(|e| format!("Failed to load PDFium {}: {}", path.display(), e));
+                        .map_err(|e| format!("Failed to load PDFium {}: {}", path.display(), e));
                 }
                 tried.push(path.display().to_string());
             }
-			Err(format!("PDFium library not found. Searched: {}", tried.join(", ")))
+            Err(format!("PDFium library not found. Searched: {}", tried.join(", ")))
         })
         .as_ref()
         .map(|_| ())
@@ -59,7 +59,7 @@ pub fn pdfium() -> Result<PdfiumGuard, String> {
     let pdfium = match PDFIUM.get() {
         Some(Ok(p)) => p,
         Some(Err(e)) => return Err(e.clone()),
-		None => return Err("PDFium has not been initialised".into()),
+        None => return Err("PDFium has not been initialised".into()),
     };
     // A panic elsewhere doesn't leave PDFium in a bad state; keep going.
     let lock = PDFIUM_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -108,20 +108,55 @@ impl Affine {
     }
 
     fn translate(x: f32, y: f32) -> Affine {
-        Affine { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: x, f: y }
+        Affine {
+            a: 1.0,
+            b: 0.0,
+            c: 0.0,
+            d: 1.0,
+            e: x,
+            f: y,
+        }
     }
 
     fn scale(s: f32) -> Affine {
-        Affine { a: s, b: 0.0, c: 0.0, d: s, e: 0.0, f: 0.0 }
+        Affine {
+            a: s,
+            b: 0.0,
+            c: 0.0,
+            d: s,
+            e: 0.0,
+            f: 0.0,
+        }
     }
 
     /// Clockwise rotation (as PDF `/Rotate` is displayed) of a `w`×`h` box whose
     /// lower-left corner is at the origin; the result again starts at the origin.
     fn rotate_box_cw(degrees: u32, w: f32, h: f32) -> Affine {
         match degrees % 360 {
-            90 => Affine { a: 0.0, b: -1.0, c: 1.0, d: 0.0, e: 0.0, f: w },
-            180 => Affine { a: -1.0, b: 0.0, c: 0.0, d: -1.0, e: w, f: h },
-            270 => Affine { a: 0.0, b: 1.0, c: -1.0, d: 0.0, e: h, f: 0.0 },
+            90 => Affine {
+                a: 0.0,
+                b: -1.0,
+                c: 1.0,
+                d: 0.0,
+                e: 0.0,
+                f: w,
+            },
+            180 => Affine {
+                a: -1.0,
+                b: 0.0,
+                c: 0.0,
+                d: -1.0,
+                e: w,
+                f: h,
+            },
+            270 => Affine {
+                a: 0.0,
+                b: 1.0,
+                c: -1.0,
+                d: 0.0,
+                e: h,
+                f: 0.0,
+            },
             _ => Affine::translate(0.0, 0.0),
         }
     }
@@ -160,9 +195,7 @@ fn place(content_w: f32, content_h: f32, s: &JobSettings, default_paper_mm: (f32
         (Some(_), _, Orientation::Landscape) | (_, Some(_), Orientation::Landscape) => 90,
         // Auto on a label: turn the content when its shape doesn't match the label's.
         (_, Some((sw, sh)), Orientation::Auto)
-            if (content_w - content_h).abs() > 0.5
-                && (sw - sh).abs() > 0.5
-                && (content_w > content_h) != (sw > sh) =>
+            if (content_w - content_h).abs() > 0.5 && (sw - sh).abs() > 0.5 && (content_w > content_h) != (sw > sh) =>
         {
             90
         }
@@ -193,10 +226,19 @@ fn place(content_w: f32, content_h: f32, s: &JobSettings, default_paper_mm: (f32
             let aw = (width - ml - mr).max(1.0);
             let scale = fit_scale(aw, None);
             let height = ch * scale + mt + mb;
-            (Sheet { width_pt: width, height_pt: height }, scale)
+            (
+                Sheet {
+                    width_pt: width,
+                    height_pt: height,
+                },
+                scale,
+            )
         }
         (None, Some((width, height))) => {
-            let sheet = Sheet { width_pt: width, height_pt: height };
+            let sheet = Sheet {
+                width_pt: width,
+                height_pt: height,
+            };
             let aw = (width - ml - mr).max(1.0);
             let ah = (height - mt - mb).max(1.0);
             (sheet, fit_scale(aw, Some(ah)))
@@ -210,9 +252,15 @@ fn place(content_w: f32, content_h: f32, s: &JobSettings, default_paper_mm: (f32
                 Orientation::Auto => cw > ch,
             };
             let sheet = if landscape {
-                Sheet { width_pt: long, height_pt: short }
+                Sheet {
+                    width_pt: long,
+                    height_pt: short,
+                }
             } else {
-                Sheet { width_pt: short, height_pt: long }
+                Sheet {
+                    width_pt: short,
+                    height_pt: long,
+                }
             };
             let aw = (sheet.width_pt - ml - mr).max(1.0);
             let ah = (sheet.height_pt - mt - mb).max(1.0);
@@ -235,7 +283,13 @@ fn place(content_w: f32, content_h: f32, s: &JobSettings, default_paper_mm: (f32
     let x = x + mm_to_pt(s.offset_x);
     let y = sheet.height_pt - top - dh - mm_to_pt(s.offset_y);
 
-    Placement { sheet, extra_rotation, scale, x, y }
+    Placement {
+        sheet,
+        extra_rotation,
+        scale,
+        x,
+        y,
+    }
 }
 
 /// Builds the print-ready PDF for `source` and writes it to `output`.
@@ -248,10 +302,10 @@ pub fn build(
     let pdfium = pdfium()?;
     let src = pdfium
         .load_pdf_from_file(source, None)
-		.map_err(|e| format!("PDF could not be opened: {}", e))?;
+        .map_err(|e| format!("PDF could not be opened: {}", e))?;
     let page_count = src.pages().len() as u32;
     if page_count == 0 {
-		return Err("PDF has no pages".into());
+        return Err("PDF has no pages".into());
     }
     let selected = match &settings.pages {
         Some(range) => range.indexes(page_count),
@@ -259,7 +313,7 @@ pub fn build(
     };
     if selected.is_empty() {
         return Err(format!(
-			"Page range '{}' is outside the document ({} pages)",
+            "Page range '{}' is outside the document ({} pages)",
             settings.pages.as_ref().map(|p| p.to_string()).unwrap_or_default(),
             page_count
         ));
@@ -279,7 +333,7 @@ pub fn build(
             src.pages()
                 .get(index as PdfPageIndex)
                 .map(|page| (index, page))
-				.map_err(|e| format!("page {}: {}", index + 1, e))
+                .map_err(|e| format!("page {}: {}", index + 1, e))
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -295,7 +349,7 @@ pub fn build(
         let form = page
             .objects()
             .copy_into_x_object_form_object(&mut out)
-				.map_err(|e| format!("page {}: {}", index + 1, e))?;
+            .map_err(|e| format!("page {}: {}", index + 1, e))?;
 
         // PDFium's XObject already maps the crop box to the origin and applies the
         // page's /Rotate, so it spans (0,0)-(content_w,content_h). Add the extra
@@ -314,16 +368,18 @@ pub fn build(
         let mut form = sheet_page
             .objects_mut()
             .add_object(form)
-				.map_err(|e| format!("page {}: {}", index + 1, e))?;
-        form.apply_matrix(PdfMatrix::new(matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f))
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("page {}: {}", index + 1, e))?;
+        form.apply_matrix(PdfMatrix::new(
+            matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f,
+        ))
+        .map_err(|e| e.to_string())?;
         sheet_page.regenerate_content().map_err(|e| e.to_string())?;
 
         sheets.push(p.sheet);
     }
 
     out.save_to_file(output)
-		.map_err(|e| format!("Failed to save print-ready PDF: {}", e))?;
+        .map_err(|e| format!("Failed to save print-ready PDF: {}", e))?;
     Ok(LayoutResult { sheets })
 }
 
@@ -342,7 +398,9 @@ pub(crate) mod tests {
         } else {
             "linux"
         };
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("pdfium").join(format!("{}-{}", os, arch));
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("pdfium")
+            .join(format!("{}-{}", os, arch));
         init(&[dir]).expect("run `bun run fetch-pdfium` first");
     }
 
@@ -361,7 +419,10 @@ pub(crate) mod tests {
         assert!((p.scale - 1.0).abs() < 1e-4);
 
         // Forced portrait: shrunk to the sheet width and centered vertically.
-        let s = job(PrintSettings { orientation: Some(Orientation::Portrait), ..Default::default() });
+        let s = job(PrintSettings {
+            orientation: Some(Orientation::Portrait),
+            ..Default::default()
+        });
         let p = place(w, h, &s, A4);
         assert!(!p.sheet.is_landscape());
         assert!((p.scale - 210.0 / 297.0).abs() < 1e-3);
@@ -371,7 +432,10 @@ pub(crate) mod tests {
         // Shrink never enlarges; fit does.
         let small = (100.0, 100.0);
         assert_eq!(place(small.0, small.1, &job(PrintSettings::default()), A4).scale, 1.0);
-        let fit = job(PrintSettings { scale: Some(Scale::Fit), ..Default::default() });
+        let fit = job(PrintSettings {
+            scale: Some(Scale::Fit),
+            ..Default::default()
+        });
         assert!(place(small.0, small.1, &fit, A4).scale > 5.0);
     }
 
@@ -380,7 +444,12 @@ pub(crate) mod tests {
         let s = job(PrintSettings {
             paper: Some(Paper::Roll { width_mm: 80.0 }),
             scale: Some(Scale::Fit),
-            margins: Some(Margins { top: 2.0, right: 2.0, bottom: 2.0, left: 2.0 }),
+            margins: Some(Margins {
+                top: 2.0,
+                right: 2.0,
+                bottom: 2.0,
+                left: 2.0,
+            }),
             ..Default::default()
         });
         let p = place(mm_to_pt(210.0), mm_to_pt(297.0), &s, A4);
@@ -393,7 +462,10 @@ pub(crate) mod tests {
     fn custom_size_is_used_as_entered() {
         let label = |orientation| {
             job(PrintSettings {
-                paper: Some(Paper::Custom { width_mm: 60.0, height_mm: 75.0 }),
+                paper: Some(Paper::Custom {
+                    width_mm: 60.0,
+                    height_mm: 75.0,
+                }),
                 orientation: Some(orientation),
                 scale: Some(Scale::Fit),
                 ..Default::default()
@@ -405,18 +477,37 @@ pub(crate) mod tests {
         for o in [Orientation::Auto, Orientation::Portrait, Orientation::Landscape] {
             let p = place(landscape_doc.0, landscape_doc.1, &label(o), A4);
             // The label never changes size or orientation.
-            assert!((p.sheet.width_pt - w).abs() < 0.01 && (p.sheet.height_pt - h).abs() < 0.01, "{:?}", o);
+            assert!(
+                (p.sheet.width_pt - w).abs() < 0.01 && (p.sheet.height_pt - h).abs() < 0.01,
+                "{:?}",
+                o
+            );
         }
         // Auto turns a landscape page to fit the portrait label; Portrait keeps it upright.
-        assert_eq!(place(landscape_doc.0, landscape_doc.1, &label(Orientation::Auto), A4).extra_rotation, 90);
-        assert_eq!(place(landscape_doc.0, landscape_doc.1, &label(Orientation::Portrait), A4).extra_rotation, 0);
-        assert_eq!(place(landscape_doc.0, landscape_doc.1, &label(Orientation::Landscape), A4).extra_rotation, 90);
+        assert_eq!(
+            place(landscape_doc.0, landscape_doc.1, &label(Orientation::Auto), A4).extra_rotation,
+            90
+        );
+        assert_eq!(
+            place(landscape_doc.0, landscape_doc.1, &label(Orientation::Portrait), A4).extra_rotation,
+            0
+        );
+        assert_eq!(
+            place(landscape_doc.0, landscape_doc.1, &label(Orientation::Landscape), A4).extra_rotation,
+            90
+        );
         // A portrait page on a portrait label needs no turn in Auto.
-        assert_eq!(place(landscape_doc.1, landscape_doc.0, &label(Orientation::Auto), A4).extra_rotation, 0);
+        assert_eq!(
+            place(landscape_doc.1, landscape_doc.0, &label(Orientation::Auto), A4).extra_rotation,
+            0
+        );
 
         // A landscape label entered as 100x50 stays 100 wide.
         let wide = job(PrintSettings {
-            paper: Some(Paper::Custom { width_mm: 100.0, height_mm: 50.0 }),
+            paper: Some(Paper::Custom {
+                width_mm: 100.0,
+                height_mm: 50.0,
+            }),
             ..Default::default()
         });
         let p = place(landscape_doc.0, landscape_doc.1, &wide, A4);
@@ -460,9 +551,9 @@ pub(crate) mod tests {
         page.objects_mut().add_path_object(blue).unwrap();
         // Unrotated corner that ends up displayed top-left for each rotation.
         let (x, y) = match rotation {
-            PdfPageRenderRotation::None => (50.0, 210.0),       // top-left
-            PdfPageRenderRotation::Degrees90 => (50.0, 50.0),   // bottom-left
-            PdfPageRenderRotation::Degrees180 => (310.0, 50.0), // bottom-right
+            PdfPageRenderRotation::None => (50.0, 210.0),        // top-left
+            PdfPageRenderRotation::Degrees90 => (50.0, 50.0),    // bottom-left
+            PdfPageRenderRotation::Degrees180 => (310.0, 50.0),  // bottom-right
             PdfPageRenderRotation::Degrees270 => (310.0, 210.0), // top-right
         };
         let red = PdfPagePathObject::new_rect(
@@ -532,8 +623,18 @@ pub(crate) mod tests {
 
             // Red marker top-left, blue elsewhere, no white gaps from a wrong crop offset.
             assert_eq!(pixel(&actual, 5, 5), (255, 0, 0), "{:?} marker", rotation);
-            assert_eq!(pixel(&actual, actual.0 - 5, actual.1 - 5), (0, 0, 255), "{:?} corner", rotation);
-            assert_eq!(pixel(&actual, actual.0 / 2, actual.1 / 2), (0, 0, 255), "{:?} middle", rotation);
+            assert_eq!(
+                pixel(&actual, actual.0 - 5, actual.1 - 5),
+                (0, 0, 255),
+                "{:?} corner",
+                rotation
+            );
+            assert_eq!(
+                pixel(&actual, actual.0 / 2, actual.1 / 2),
+                (0, 0, 255),
+                "{:?} middle",
+                rotation
+            );
         }
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -547,7 +648,9 @@ pub(crate) mod tests {
         make_marked_pdf(&src, PdfPageRenderRotation::None); // 300x200 displayed
 
         let s = job(PrintSettings {
-            paper: Some(Paper::Roll { width_mm: crate::settings::pt_to_mm(200.0) }),
+            paper: Some(Paper::Roll {
+                width_mm: crate::settings::pt_to_mm(200.0),
+            }),
             orientation: Some(Orientation::Landscape),
             scale: Some(Scale::None),
             ..Default::default()
@@ -597,7 +700,10 @@ pub(crate) mod tests {
         let src = dir.join("src.pdf");
         make_marked_pdf(&src, PdfPageRenderRotation::None);
 
-        let s = job(PrintSettings { pages: Some("5-9".parse::<PageRange>().unwrap()), ..Default::default() });
+        let s = job(PrintSettings {
+            pages: Some("5-9".parse::<PageRange>().unwrap()),
+            ..Default::default()
+        });
         assert!(build(&src, &dir.join("o.pdf"), &s, A4).is_err());
 
         let bogus = dir.join("bogus.pdf");
@@ -606,7 +712,6 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 }
-
 
 #[cfg(test)]
 mod visual {
@@ -624,15 +729,26 @@ mod visual {
             ("a4-auto", r#"{}"#),
             ("a4-portrait", r#"{"paper":"A4","orientation":"portrait"}"#),
             ("roll80-fit", r#"{"paper":"80mm","scale":"fit","margins":"2"}"#),
-            ("label-100x150", r#"{"paper":"100x150mm","scale":"fit","orientation":"portrait","margins":"3"}"#),
-            ("a5-topleft-offset", r#"{"paper":"A5","align":"top-left","offset_x":5,"offset_y":5,"scale":"80%"}"#),
+            (
+                "label-100x150",
+                r#"{"paper":"100x150mm","scale":"fit","orientation":"portrait","margins":"3"}"#,
+            ),
+            (
+                "a5-topleft-offset",
+                r#"{"paper":"A5","align":"top-left","offset_x":5,"offset_y":5,"scale":"80%"}"#,
+            ),
         ];
         for (name, json) in cases {
             let s: PrintSettings = serde_json::from_str(json).unwrap();
             let job = JobSettings::resolve(&s, "test".into());
             let r = build(&src, &out.join(format!("{}.pdf", name)), &job, (210.0, 297.0)).unwrap();
-            println!("{}: {} sheet(s), first {:.1}x{:.1}mm", name, r.sheets.len(),
-                crate::settings::pt_to_mm(r.sheets[0].width_pt), crate::settings::pt_to_mm(r.sheets[0].height_pt));
+            println!(
+                "{}: {} sheet(s), first {:.1}x{:.1}mm",
+                name,
+                r.sheets.len(),
+                crate::settings::pt_to_mm(r.sheets[0].width_pt),
+                crate::settings::pt_to_mm(r.sheets[0].height_pt)
+            );
         }
     }
 }

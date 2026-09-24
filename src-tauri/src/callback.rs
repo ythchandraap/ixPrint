@@ -24,8 +24,12 @@ const POLL_EVERY: Duration = Duration::from_secs(3);
 /// A job still not done after this is reported as `timeout`.
 const GIVE_UP_AFTER: Duration = Duration::from_secs(60 * 60);
 /// Pause before each delivery attempt; 2xx ends it.
-const RETRY_DELAYS: [Duration; 4] =
-    [Duration::ZERO, Duration::from_secs(5), Duration::from_secs(30), Duration::from_secs(120)];
+const RETRY_DELAYS: [Duration; 4] = [
+    Duration::ZERO,
+    Duration::from_secs(5),
+    Duration::from_secs(30),
+    Duration::from_secs(120),
+];
 
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 
@@ -47,7 +51,8 @@ impl Callback {
         let Some(url) = url.map(str::trim).filter(|u| !u.is_empty()) else {
             return Ok(None);
         };
-		let token = token.ok_or("callback_url can only be used with an API token (the callback is signed with that token)")?;
+        let token =
+            token.ok_or("callback_url can only be used with an API token (the callback is signed with that token)")?;
         validate_url(url)?;
         let reference = reference.map(str::trim).filter(|r| !r.is_empty());
         if reference.is_some_and(|r| r.chars().count() > MAX_REFERENCE) {
@@ -62,12 +67,15 @@ impl Callback {
 }
 
 fn validate_url(url: &str) -> Result<(), String> {
-	let bad = || format!("callback_url is invalid: '{}' (must use http:// or https://)", url);
+    let bad = || format!("callback_url is invalid: '{}' (must use http:// or https://)", url);
     if url.len() > MAX_URL {
         return Err(format!("callback_url maksimal {} karakter", MAX_URL));
     }
     let lower = url.to_ascii_lowercase();
-    let rest = lower.strip_prefix("https://").or_else(|| lower.strip_prefix("http://")).ok_or_else(bad)?;
+    let rest = lower
+        .strip_prefix("https://")
+        .or_else(|| lower.strip_prefix("http://"))
+        .ok_or_else(bad)?;
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
     if authority.is_empty() || url.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return Err(bad());
@@ -92,7 +100,7 @@ fn validate_url(url: &str) -> Result<(), String> {
         // DNS-rebinding protection is deferred to a later iteration.
     }
     if authority.contains('@') {
-		return Err("callback_url must not contain a username or password".into());
+        return Err("callback_url must not contain a username or password".into());
     }
     Ok(())
 }
@@ -118,8 +126,12 @@ pub struct Payload {
 /// Refused when too many jobs are being watched already.
 pub fn watch(state: Arc<AppState>, job: &JobResult, callback: Callback) -> Result<(), String> {
     let record = {
-        let (state, job_id, url, reference) =
-            (state.clone(), job.job_id.clone(), callback.url.clone(), callback.reference.clone());
+        let (state, job_id, url, reference) = (
+            state.clone(),
+            job.job_id.clone(),
+            callback.url.clone(),
+            callback.reference.clone(),
+        );
         move |status: &str, result: Option<&str>, attempts: u32, outcome: Option<&Attempt>| {
             let (http_status, error) = match outcome {
                 Some(Attempt::Delivered(code)) => (Some(*code), None),
@@ -137,14 +149,22 @@ pub fn watch(state: Arc<AppState>, job: &JobResult, callback: Callback) -> Resul
                 time: chrono::Local::now().to_rfc3339(),
             };
             if let Err(e) = state.history.append_callback(&job_id, entry) {
-				eprintln!("[ix.print] callback status was not recorded in history: {}", e);
+                eprintln!("[ix.print] callback status was not recorded in history: {}", e);
             }
         }
     };
     if ACTIVE.fetch_add(1, Ordering::SeqCst) >= MAX_ACTIVE {
         ACTIVE.fetch_sub(1, Ordering::SeqCst);
-		let message = "too many callbacks are currently waiting".to_string();
-        record("refused", None, 0, Some(&Attempt::Failed { status: None, error: message.clone() }));
+        let message = "too many callbacks are currently waiting".to_string();
+        record(
+            "refused",
+            None,
+            0,
+            Some(&Attempt::Failed {
+                status: None,
+                error: message.clone(),
+            }),
+        );
         return Err(message);
     }
     record("watching", None, 0, None);
@@ -173,19 +193,23 @@ pub fn watch(state: Arc<AppState>, job: &JobResult, callback: Callback) -> Resul
             match text("state").as_deref().unwrap_or("unknown") {
                 "completed" => break payload("job.finished", Some(true), "completed", None),
                 "failed" => break payload("job.finished", Some(false), "failed", message),
-                "gone" => break payload(
-                    "job.finished",
-                    Some(false),
-                    "gone",
-				Some("Job left the queue without completing (it may have been cancelled)".into()),
-                ),
+                "gone" => {
+                    break payload(
+                        "job.finished",
+                        Some(false),
+                        "gone",
+                        Some("Job left the queue without completing (it may have been cancelled)".into()),
+                    )
+                }
                 // Spoolers that give no job reference: handed over is all we can know.
-                "unknown" if should_mark_sent(&status) => break payload(
-                    "job.finished",
-                    Some(true),
-                    "sent",
-				Some("Sent to the printer; the spooler did not report the job status".into()),
-                ),
+                "unknown" if should_mark_sent(&status) => {
+                    break payload(
+                        "job.finished",
+                        Some(true),
+                        "sent",
+                        Some("Sent to the printer; the spooler did not report the job status".into()),
+                    )
+                }
                 "error" if !problem_sent => {
                     problem_sent = true;
                     let p = payload("job.problem", None, "error", message);
@@ -200,7 +224,11 @@ pub fn watch(state: Arc<AppState>, job: &JobResult, callback: Callback) -> Resul
                     "job.finished",
                     Some(false),
                     "timeout",
-                    Some(format!("Belum selesai setelah {} menit (status terakhir: {})", GIVE_UP_AFTER.as_secs() / 60, last)),
+                    Some(format!(
+                        "Belum selesai setelah {} menit (status terakhir: {})",
+                        GIVE_UP_AFTER.as_secs() / 60,
+                        last
+                    )),
                 );
             }
             std::thread::sleep(POLL_EVERY);
@@ -226,7 +254,12 @@ pub fn signature(key: &str, timestamp: i64, body: &[u8]) -> String {
     mac.update(timestamp.to_string().as_bytes());
     mac.update(b".");
     mac.update(body);
-    let hex: String = mac.finalize().into_bytes().iter().map(|b| format!("{:02x}", b)).collect();
+    let hex: String = mac
+        .finalize()
+        .into_bytes()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect();
     format!("sha256={}", hex)
 }
 
@@ -261,16 +294,19 @@ fn deliver(callback: &Callback, payload: &Payload, mut progress: impl FnMut(&str
             Ok(resp) if resp.status().is_success() => Attempt::Delivered(resp.status().as_u16()),
             Ok(resp) => Attempt::Failed {
                 status: Some(resp.status().as_u16()),
-				error: format!("Receiving server returned HTTP {}", resp.status().as_u16()),
+                error: format!("Receiving server returned HTTP {}", resp.status().as_u16()),
             },
-            Err(e) => Attempt::Failed { status: None, error: e.to_string() },
+            Err(e) => Attempt::Failed {
+                status: None,
+                error: e.to_string(),
+            },
         };
         let attempts = i as u32 + 1;
         match &attempt {
             Attempt::Delivered(_) => return progress("delivered", attempts, &attempt),
             Attempt::Failed { error, .. } if attempts as usize == RETRY_DELAYS.len() => {
-					eprintln!(
-						"[ix.print] callback {} for job {} failed to send to {}: {}",
+                eprintln!(
+                    "[ix.print] callback {} for job {} failed to send to {}: {}",
                     payload.event, payload.job_id, callback.url, error
                 );
                 return progress("failed", attempts, &attempt);
@@ -290,7 +326,13 @@ mod tests {
         let ok = |url: &str| Callback::from_request(Some(url), None, Some(&token));
         assert!(ok("https://simrs.contoh.id/api/print-callback?x=1").unwrap().is_some());
         assert!(ok("http://192.168.1.20:8080/cb").unwrap().is_some());
-        for bad in ["ftp://a.id/x", "https://", "javascript:alert(1)", "https://u:p@a.id/", "https://a.id/ x"] {
+        for bad in [
+            "ftp://a.id/x",
+            "https://",
+            "javascript:alert(1)",
+            "https://u:p@a.id/",
+            "https://a.id/ x",
+        ] {
             assert!(ok(bad).is_err(), "{}", bad);
         }
         assert!(Callback::from_request(None, None, None).unwrap().is_none());
@@ -308,7 +350,13 @@ mod tests {
             "http://169.254.169.254/latest/meta-data",
             "http://[::1]:9000/hook",
         ] {
-            assert!(validate_url(url).unwrap_err().contains("cannot target a loopback or link-local address"), "{}", url);
+            assert!(
+                validate_url(url)
+                    .unwrap_err()
+                    .contains("cannot target a loopback or link-local address"),
+                "{}",
+                url
+            );
         }
         assert!(validate_url("http://192.168.1.50:9000/hook").is_ok());
         assert!(validate_url("https://simrs.contoh.id/api/print-callback?x=1").is_ok());
@@ -335,7 +383,9 @@ mod tests {
             .unwrap();
         let mut body = vec![0; len];
         reader.read_exact(&mut body).unwrap();
-        stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").unwrap();
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+            .unwrap();
         (head, String::from_utf8(body).unwrap())
     }
 
@@ -355,7 +405,13 @@ mod tests {
             diagnostics: crate::diagnostics::Diagnostics::new(&dir),
             jobs_dir: dir.join("jobs"),
         });
-        let job = JobResult { job_id: "job-1".into(), printer: "EPSON".into(), preset: Some("struk".into()), sheets: 2, spooler_job: None };
+        let job = JobResult {
+            job_id: "job-1".into(),
+            printer: "EPSON".into(),
+            preset: Some("struk".into()),
+            sheets: 2,
+            spooler_job: None,
+        };
         state
             .history
             .append(&crate::history::HistoryEntry {
@@ -383,7 +439,11 @@ mod tests {
         let (token, stored) = crate::auth::generate("SIMRS").unwrap();
         // This test exercises delivery/signing with a local receiver. User supplied
         // callback URLs go through validate_url, which intentionally rejects loopback.
-        let cb = Callback { url, reference: Some("ORDER-42".into()), key: stored.hash.clone() };
+        let cb = Callback {
+            url,
+            reference: Some("ORDER-42".into()),
+            key: stored.hash.clone(),
+        };
         let history = crate::history::History::new(dir.join("history"));
         watch(state, &job, cb).unwrap();
         let (head, body) = receive(listener);
@@ -396,20 +456,34 @@ mod tests {
         assert_eq!(json["state"], "failed");
         assert_eq!(json["message"], "Kertas macet");
         // The receiver verifies with its own token: key = hex SHA-256 of the token.
-        let header = |name: &str| head.lines().find_map(|l| l.strip_prefix(name)).map(|v| v.trim().to_string()).unwrap();
+        let header = |name: &str| {
+            head.lines()
+                .find_map(|l| l.strip_prefix(name))
+                .map(|v| v.trim().to_string())
+                .unwrap()
+        };
         let ts: i64 = header("x-ixprint-timestamp:").parse().unwrap();
-        assert_eq!(header("x-ixprint-signature:"), signature(&crate::auth::hash(&token), ts, body.as_bytes()));
+        assert_eq!(
+            header("x-ixprint-signature:"),
+            signature(&crate::auth::hash(&token), ts, body.as_bytes())
+        );
 
         // The History tab sees the delivery.
         let delivered = (0..50).find_map(|_| {
-            let cb = history.find("job-1").and_then(|e| e.callback).filter(|c| c.state == "delivered");
+            let cb = history
+                .find("job-1")
+                .and_then(|e| e.callback)
+                .filter(|c| c.state == "delivered");
             if cb.is_none() {
                 std::thread::sleep(Duration::from_millis(20));
             }
             cb
         });
         let cb = delivered.expect("callback status recorded");
-        assert_eq!((cb.result.as_deref(), cb.attempts, cb.http_status), (Some("failed"), 1, Some(200)));
+        assert_eq!(
+            (cb.result.as_deref(), cb.attempts, cb.http_status),
+            (Some("failed"), 1, Some(200))
+        );
         assert_eq!(cb.reference.as_deref(), Some("ORDER-42"));
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -421,12 +495,19 @@ mod tests {
             signature("k", 1700000000, br#"{"a":1}"#),
             "sha256=1b6ad1bc9bf48c52ce01939866d5877c6cc4e87ddad27e16673cb8c4964394a3"
         );
-        assert_ne!(signature("k", 1700000000, br#"{"a":1}"#), signature("k", 1700000001, br#"{"a":1}"#));
+        assert_ne!(
+            signature("k", 1700000000, br#"{"a":1}"#),
+            signature("k", 1700000001, br#"{"a":1}"#)
+        );
     }
 
     #[test]
     fn remote_unknown_status_is_not_marked_sent() {
-        assert!(!should_mark_sent(&serde_json::json!({"state":"unknown","spooler_job":null,"remote":"PC2"})));
-        assert!(should_mark_sent(&serde_json::json!({"state":"unknown","spooler_job":null})));
+        assert!(!should_mark_sent(
+            &serde_json::json!({"state":"unknown","spooler_job":null,"remote":"PC2"})
+        ));
+        assert!(should_mark_sent(
+            &serde_json::json!({"state":"unknown","spooler_job":null})
+        ));
     }
 }
