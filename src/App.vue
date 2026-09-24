@@ -6,7 +6,7 @@ import { ArrowLeft, Copy, MonitorX, Printer, Settings } from "lucide-vue-next";
 import { api, errorText, isInApp, type Config, type PrinterView } from "./api";
 import PrintersTab from "@/features/printers/PrintersTab.vue";
 import PresetsTab from "@/features/presets/PresetsTab.vue";
-import HistoryTab from "./components/HistoryTab.vue";
+import HistoryTab from "@/features/history/HistoryTab.vue";
 import PrintTab from "@/features/print/PrintTab.vue";
 import ErrorLogPanel from "./components/ErrorLogPanel.vue";
 import SettingsView from "./components/SettingsView.vue";
