@@ -12,6 +12,7 @@ use crate::job::{AppState, JobResult};
 use hmac::{Hmac, Mac};
 use serde::Serialize;
 use sha2::Sha256;
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -32,6 +33,8 @@ const RETRY_DELAYS: [Duration; 4] = [
 ];
 
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
+#[cfg(test)]
+static ALLOW_LOOPBACK_FOR_TESTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Where and how to report one job.
 pub struct Callback {
@@ -85,24 +88,69 @@ fn validate_url(url: &str) -> Result<(), String> {
     } else {
         authority.rsplit_once(':').map(|(host, _)| host).unwrap_or(authority)
     };
-    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
-        let blocked = match ip {
-            std::net::IpAddr::V4(ip) => ip.is_loopback() || ip.is_link_local(),
-            std::net::IpAddr::V6(ip) => {
-                let octets = ip.octets();
-                ip.is_loopback() || (octets[0] == 0xfe && octets[1] & 0xc0 == 0x80)
-            }
-        };
-        if blocked {
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_blocked_ip(ip) {
             return Err("callback_url cannot target a loopback or link-local address".into());
         }
-    } else {
-        // DNS-rebinding protection is deferred to a later iteration.
     }
     if authority.contains('@') {
         return Err("callback_url must not contain a username or password".into());
     }
     Ok(())
+}
+
+fn is_blocked_ip(ip: IpAddr) -> bool {
+    #[cfg(test)]
+    if ALLOW_LOOPBACK_FOR_TESTS.load(Ordering::SeqCst) && ip.is_loopback() {
+        return false;
+    }
+
+    match ip {
+        IpAddr::V4(ip) => {
+            ip.is_loopback() || ip.is_link_local() || ip.is_unspecified() || ip.is_broadcast() || ip.is_multicast()
+        }
+        IpAddr::V6(ip) => {
+            if let Some(ipv4) = ip.to_ipv4_mapped() {
+                return is_blocked_ip(IpAddr::V4(ipv4));
+            }
+            let first = ip.segments()[0];
+            ip.is_loopback() || ip.is_unspecified() || ip.is_multicast() || first & 0xffc0 == 0xfe80
+        }
+    }
+}
+
+fn resolve_checked(host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
+    let addresses = (host, port)
+        .to_socket_addrs()
+        .map_err(|_| "callback_url host could not be resolved".to_string())?
+        .collect::<Vec<_>>();
+    if addresses.is_empty() {
+        return Err("callback_url host could not be resolved".into());
+    }
+    if addresses.iter().any(|address| is_blocked_ip(address.ip())) {
+        return Err("callback_url resolves to a loopback or link-local address".into());
+    }
+    Ok(addresses)
+}
+
+fn callback_host_and_port(url: &str) -> Result<(String, u16), String> {
+    let uri = url
+        .parse::<ureq::http::Uri>()
+        .map_err(|_| "callback_url is invalid".to_string())?;
+    let authority = uri.authority().ok_or_else(|| "callback_url is invalid".to_string())?;
+    if authority.port().is_some() && authority.port_u16().is_none() {
+        return Err("callback_url is invalid".into());
+    }
+    let default_port = match uri.scheme_str() {
+        Some("http") => 80,
+        Some("https") => 443,
+        _ => return Err("callback_url is invalid".into()),
+    };
+    let host = authority.host().trim_matches(['[', ']']).to_string();
+    if host.is_empty() {
+        return Err("callback_url is invalid".into());
+    }
+    Ok((host, authority.port_u16().unwrap_or(default_port)))
 }
 
 #[derive(Serialize, Debug)]
@@ -268,38 +316,66 @@ pub enum Attempt {
     Failed { status: Option<u16>, error: String },
 }
 
-/// Sends `payload`, retrying per `RETRY_DELAYS`. `progress(state, attempts, outcome)`
-/// is told about each attempt: `retrying`, then `delivered` or `failed`.
-fn deliver(callback: &Callback, payload: &Payload, mut progress: impl FnMut(&str, u32, &Attempt)) {
-    let Ok(body) = serde_json::to_vec(payload) else { return };
-    let agent: ureq::Agent = ureq::Agent::config_builder()
+#[derive(Debug)]
+struct PinnedResolver {
+    addresses: Vec<SocketAddr>,
+}
+
+impl ureq::unversioned::resolver::Resolver for PinnedResolver {
+    fn resolve(
+        &self,
+        _uri: &ureq::http::Uri,
+        _config: &ureq::config::Config,
+        _timeout: ureq::unversioned::transport::NextTimeout,
+    ) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
+        let mut resolved = self.empty();
+        for address in self.addresses.iter().copied().take(16) {
+            resolved.push(address);
+        }
+        Ok(resolved)
+    }
+}
+
+fn callback_agent(addresses: Vec<SocketAddr>) -> ureq::Agent {
+    let config = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(10)))
         .http_status_as_error(false)
         .max_redirects(0)
         .max_redirects_will_error(false)
         .user_agent(concat!("ix.print/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .into();
+        .build();
+    ureq::Agent::with_parts(
+        config,
+        ureq::unversioned::transport::DefaultConnector::default(),
+        PinnedResolver { addresses },
+    )
+}
+
+/// Sends `payload`, retrying per `RETRY_DELAYS`. `progress(state, attempts, outcome)`
+/// is told about each attempt: `retrying`, then `delivered` or `failed`.
+fn deliver(callback: &Callback, payload: &Payload, mut progress: impl FnMut(&str, u32, &Attempt)) {
+    let Ok(body) = serde_json::to_vec(payload) else { return };
     for (i, delay) in RETRY_DELAYS.iter().enumerate() {
         std::thread::sleep(*delay);
         let timestamp = chrono::Utc::now().timestamp();
-        let result = agent
-            .post(&callback.url)
-            .header("Content-Type", "application/json")
-            .header("X-IxPrint-Event", payload.event)
-            .header("X-IxPrint-Timestamp", timestamp.to_string())
-            .header("X-IxPrint-Signature", signature(&callback.key, timestamp, &body))
-            .send(&body[..]);
+        let result = callback_host_and_port(&callback.url).and_then(|(host, port)| {
+            let addresses = resolve_checked(&host, port)?;
+            callback_agent(addresses)
+                .post(&callback.url)
+                .header("Content-Type", "application/json")
+                .header("X-IxPrint-Event", payload.event)
+                .header("X-IxPrint-Timestamp", timestamp.to_string())
+                .header("X-IxPrint-Signature", signature(&callback.key, timestamp, &body))
+                .send(&body[..])
+                .map_err(|e| e.to_string())
+        });
         let attempt = match result {
             Ok(resp) if resp.status().is_success() => Attempt::Delivered(resp.status().as_u16()),
             Ok(resp) => Attempt::Failed {
                 status: Some(resp.status().as_u16()),
                 error: format!("Receiving server returned HTTP {}", resp.status().as_u16()),
             },
-            Err(e) => Attempt::Failed {
-                status: None,
-                error: e.to_string(),
-            },
+            Err(error) => Attempt::Failed { status: None, error },
         };
         let attempts = i as u32 + 1;
         match &attempt {
@@ -319,6 +395,16 @@ fn deliver(callback: &Callback, payload: &Payload, mut progress: impl FnMut(&str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    static LOOPBACK_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct LoopbackTestOverride;
+
+    impl Drop for LoopbackTestOverride {
+        fn drop(&mut self) {
+            ALLOW_LOOPBACK_FOR_TESTS.store(false, Ordering::SeqCst);
+        }
+    }
 
     #[test]
     fn validates_requests() {
@@ -345,6 +431,7 @@ mod tests {
 
     #[test]
     fn rejects_loopback_and_link_local_ip_literals() {
+        let _lock = LOOPBACK_TEST_LOCK.lock().unwrap();
         for url in [
             "http://127.0.0.1:8080/hook",
             "http://169.254.169.254/latest/meta-data",
@@ -360,6 +447,33 @@ mod tests {
         }
         assert!(validate_url("http://192.168.1.50:9000/hook").is_ok());
         assert!(validate_url("https://simrs.contoh.id/api/print-callback?x=1").is_ok());
+    }
+
+    #[test]
+    fn blocks_only_unsafe_ip_ranges() {
+        let _lock = LOOPBACK_TEST_LOCK.lock().unwrap();
+        for address in [
+            "127.0.0.1",
+            "::1",
+            "169.254.169.254",
+            "fe80::1",
+            "0.0.0.0",
+            "::",
+            "::ffff:127.0.0.1",
+            "224.0.0.1",
+        ] {
+            assert!(is_blocked_ip(address.parse().unwrap()), "{}", address);
+        }
+        for address in ["10.1.2.3", "192.168.1.5", "172.16.0.9", "8.8.8.8", "fd00::1"] {
+            assert!(!is_blocked_ip(address.parse().unwrap()), "{}", address);
+        }
+    }
+
+    #[test]
+    fn resolve_checked_rejects_loopback_hosts() {
+        let _lock = LOOPBACK_TEST_LOCK.lock().unwrap();
+        assert!(resolve_checked("localhost", 80).is_err());
+        assert!(resolve_checked("127.0.0.1", 80).is_err());
     }
 
     /// Accepts one HTTP request on `listener`, answers 200, returns (headers, body).
@@ -391,6 +505,7 @@ mod tests {
 
     #[test]
     fn delivers_signed_result_of_failed_job() {
+        let _lock = LOOPBACK_TEST_LOCK.lock().unwrap();
         let dir = std::env::temp_dir().join(format!("ixprint-cb-{}", uuid::Uuid::new_v4()));
         let state = Arc::new(AppState {
             config: crate::config::ConfigStore::load(&dir),
@@ -445,6 +560,8 @@ mod tests {
             key: stored.hash.clone(),
         };
         let history = crate::history::History::new(dir.join("history"));
+        ALLOW_LOOPBACK_FOR_TESTS.store(true, Ordering::SeqCst);
+        let _loopback_override = LoopbackTestOverride;
         watch(state, &job, cb).unwrap();
         let (head, body) = receive(listener);
 
