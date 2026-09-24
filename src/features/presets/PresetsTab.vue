@@ -2,7 +2,7 @@
 import { computed, ref } from "vue";
 import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import { Download, Pencil, Plus, Printer, SlidersHorizontal, Star, Trash2, Upload } from "lucide-vue-next";
-import EmptyState from "@/components/EmptyState.vue";
+import EmptyState from "@/shared/ui/EmptyState.vue";
 import { api, errorText, type Config, type ImportPreview, type PrinterView, type PrintSettings } from "@/shared/api";
 import { summarize } from "@/shared/lib/preset";
 import PresetForm from "./PresetForm.vue";

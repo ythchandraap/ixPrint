@@ -8,7 +8,7 @@ import {
 	type TemplateElement,
 } from "@/shared/api";
 import { templateAutoFields, templateFields } from "@/shared/lib/template";
-import AutocompleteField from "@/components/AutocompleteField.vue";
+import AutocompleteField from "@/shared/ui/AutocompleteField.vue";
 
 const props = defineProps<{
 	/** Name of the preset this design belongs to (for the example request). */

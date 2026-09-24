@@ -5,7 +5,7 @@ import { api, errorText, type Config } from "@/shared/api";
 import ApiTab from "@/features/api-tokens/ApiTab.vue";
 import ErrorLogPanel from "@/features/diagnostics/ErrorLogPanel.vue";
 import RemotesPanel from "@/features/remotes/RemotesPanel.vue";
-import SettingInfo from "@/components/SettingInfo.vue";
+import SettingInfo from "@/shared/ui/SettingInfo.vue";
 
 const props = defineProps<{ config: Config; localIp: string; os: string }>();
 const emit = defineEmits<{

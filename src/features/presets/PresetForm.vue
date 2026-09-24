@@ -11,7 +11,7 @@ import {
 	type Template,
 } from "@/shared/api";
 import { templateFields } from "@/shared/lib/template";
-import AutocompleteField from "@/components/AutocompleteField.vue";
+import AutocompleteField from "@/shared/ui/AutocompleteField.vue";
 import DesignEditor from "@/features/design-editor/DesignEditor.vue";
 
 const props = defineProps<{

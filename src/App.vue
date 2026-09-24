@@ -10,7 +10,7 @@ import HistoryTab from "@/features/history/HistoryTab.vue";
 import PrintTab from "@/features/print/PrintTab.vue";
 import ErrorLogPanel from "@/features/diagnostics/ErrorLogPanel.vue";
 import SettingsView from "@/features/settings/SettingsView.vue";
-import EmptyState from "./components/EmptyState.vue";
+import EmptyState from "@/shared/ui/EmptyState.vue";
 import OnboardingDialog from "@/features/settings/OnboardingDialog.vue";
 
 /** Product name, in one place so a rename touches a single line. */
