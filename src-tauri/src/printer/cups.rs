@@ -64,7 +64,7 @@ fn parse_printer_states(text: &str) -> Vec<PrinterState> {
             };
             let printing = state
                 .strip_prefix("now printing ")
-                .and_then(|r| r.split(|c: char| c == ' ' || c == '.').next())
+                .and_then(|r| r.split([' ', '.']).next())
                 .filter(|id| !id.is_empty())
                 .map(str::to_string);
             let status = if state.contains("disabled") {
@@ -280,7 +280,7 @@ pub fn capabilities(printer: &str) -> Result<Capabilities, String> {
             .iter()
             .any(|v| !matches!(v.as_str(), "None" | "False" | "one-sided"))
     });
-    let color = find(&["ColorModel", "print-color-mode", "ColorMode"]).map_or(false, |o| {
+    let color = find(&["ColorModel", "print-color-mode", "ColorMode"]).is_some_and(|o| {
         o.values.iter().any(|v| {
             let v = v.to_ascii_lowercase();
             v.contains("rgb") || v.contains("cmy") || v == "color"

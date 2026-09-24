@@ -84,7 +84,7 @@ struct CallbackLine {
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Line {
-    Entry(HistoryEntry),
+    Entry(Box<HistoryEntry>),
     Callback(CallbackLine),
 }
 
@@ -174,7 +174,7 @@ impl History {
         let mut callbacks = std::collections::HashMap::new();
         for line in text.lines() {
             match serde_json::from_str(line) {
-                Ok(Line::Entry(e)) => entries.push(e),
+                Ok(Line::Entry(e)) => entries.push(*e),
                 Ok(Line::Callback(c)) => {
                     callbacks.insert(c.callback_for, c.callback);
                 }

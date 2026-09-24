@@ -795,7 +795,9 @@ fn build<'a>(
     let err = |i: usize, e: String| format!("elemen #{}: {}", i + 1, e);
 
     // (page height, list of (element, dy, values)) per page
-    let pages: Vec<(f32, Vec<(usize, f32, Record)>)> = match template.layout {
+    type PageElements = Vec<(usize, f32, Record)>;
+    type RenderedPage = (f32, PageElements);
+    let pages: Vec<RenderedPage> = match template.layout {
         Layout::Label => records
             .iter()
             .enumerate()
