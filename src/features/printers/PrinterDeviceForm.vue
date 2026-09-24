@@ -10,8 +10,8 @@ import {
 	type PrinterDetails,
 	type PrinterDevice,
 	type PrinterDriver,
-} from "../api";
-import AutocompleteField from "./AutocompleteField.vue";
+} from "@/shared/api";
+import AutocompleteField from "@/components/AutocompleteField.vue";
 
 const props = defineProps<{
 	/** Existing printer to edit; undefined = add a new one. */
