@@ -1,5 +1,6 @@
 //! OS printer adapter dispatch and platform-neutral printer operations.
 
+use crate::application::ports::PrinterGateway;
 use crate::domain::layout::Sheet;
 use crate::domain::printer::{Capabilities, DeviceOptions, JobState, JobStatus, Printer, PrinterQueue};
 use std::path::Path;
@@ -85,6 +86,45 @@ pub fn default_paper_mm(printer: &str) -> (f32, f32) {
 /// reference when it gives one.
 pub fn print(printer: &str, pdf: &Path, sheets: &[Sheet], options: &DeviceOptions) -> Result<Option<String>, String> {
     backend::print(printer, pdf, sheets, options)
+}
+
+#[derive(Default)]
+pub struct LocalPrinterGateway;
+
+impl PrinterGateway for LocalPrinterGateway {
+    fn list_printers(&self) -> Vec<Printer> {
+        list_printers()
+    }
+
+    fn os_default_printer(&self) -> Option<String> {
+        os_default_printer()
+    }
+
+    fn capabilities(&self, printer: &str) -> Result<Capabilities, String> {
+        capabilities(printer)
+    }
+
+    fn default_paper_mm(&self, printer: &str) -> (f32, f32) {
+        default_paper_mm(printer)
+    }
+
+    fn print(
+        &self,
+        printer: &str,
+        pdf: &Path,
+        sheets: &[Sheet],
+        options: &DeviceOptions,
+    ) -> Result<Option<String>, String> {
+        print(printer, pdf, sheets, options)
+    }
+
+    fn queue(&self, printer: &str) -> Result<PrinterQueue, String> {
+        queue(printer)
+    }
+
+    fn job_status(&self, printer: &str, spooler_job: &str) -> Result<JobStatus, String> {
+        job_status(printer, spooler_job)
+    }
 }
 
 #[cfg(test)]

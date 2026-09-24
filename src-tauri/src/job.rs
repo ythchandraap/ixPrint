@@ -1,42 +1,13 @@
 //! One print job, from uploaded PDF to spooler: resolve settings, lay out,
 //! print, record history. Shared by the HTTP endpoint and the app's test print.
 
-use crate::config::ConfigStore;
-use crate::history::{History, HistoryEntry};
+pub use crate::application::state::AppState;
+use crate::history::HistoryEntry;
 use crate::settings::{Align, JobSettings, Margins, Orientation, Paper, PrintSettings, Scale};
 use crate::{layout, printer, testpage};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-
-pub struct AppState {
-    pub config: ConfigStore,
-    /// Random in-process credential used only by the desktop window's local
-    /// HTTP client. It is never persisted or exposed to the frontend.
-    pub desktop_key: String,
-    pub remotes: crate::remote::RemoteStore,
-    /// Last /list-printer answer per remote id.
-    pub remote_cache: crate::remote::RemoteCache,
-    /// Why the HTTP server could not start (e.g. port in use); `None` while it runs.
-    pub server_error: std::sync::Mutex<Option<String>>,
-    /// Handle used to stop the local HTTP bridge without stopping the app.
-    pub server_handle: std::sync::Mutex<Option<actix_web::dev::ServerHandle>>,
-    pub token_usage: crate::auth::TokenUsage,
-    pub in_flight: crate::auth::InFlight,
-    /// Clients locked out after repeatedly sending wrong tokens.
-    pub failed_auth: crate::auth::FailedAttempts,
-    pub history: History,
-    pub diagnostics: crate::diagnostics::Diagnostics,
-    /// Scratch space for uploads and print-ready PDFs; files are deleted after each job.
-    pub jobs_dir: PathBuf,
-}
-
-impl AppState {
-    /// The printer used when neither the request nor the preset names one.
-    pub fn default_printer(&self) -> Option<String> {
-        self.config.get().default_printer.or_else(printer::os_default_printer)
-    }
-}
 
 #[derive(Debug)]
 pub enum JobError {

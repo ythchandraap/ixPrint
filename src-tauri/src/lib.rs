@@ -23,10 +23,15 @@ mod testpage;
 
 use config::ConfigStore;
 use history::History;
-use job::AppState;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
+
+use application::state::AppState;
+use infrastructure::net::{callback_client::CallbackClient, remote_client::RemoteClient};
+use infrastructure::os::SystemClock;
+use infrastructure::pdf::PdfEngineAdapter;
+use infrastructure::printing::{admin::LocalPrinterAdmin, LocalPrinterGateway};
 
 #[cfg(desktop)]
 fn focus_main(app: &tauri::AppHandle, tab: Option<&str>) {
@@ -180,17 +185,22 @@ pub fn run() {
             history.prune(config.get().history_retention_days);
 
             let state = Arc::new(AppState {
-                config,
+                config: Arc::new(config),
                 desktop_key: uuid::Uuid::new_v4().to_string(),
-                remotes,
-                remote_cache: Default::default(),
-                server_error: Default::default(),
-                server_handle: Default::default(),
+                remotes: Arc::new(remotes),
+                remote_cache: Mutex::new(Default::default()),
+                server: Arc::new(server::HttpServerControl::default()),
                 token_usage: Default::default(),
                 in_flight: Default::default(),
                 failed_auth: Default::default(),
-                history,
-                diagnostics,
+                history: Arc::new(history),
+                diagnostics: Arc::new(diagnostics),
+                printer_gateway: Arc::new(LocalPrinterGateway),
+                printer_admin: Arc::new(LocalPrinterAdmin),
+                pdf_engine: Arc::new(PdfEngineAdapter),
+                remote_gateway: Arc::new(RemoteClient),
+                callback_sender: Arc::new(CallbackClient),
+                clock: Arc::new(SystemClock),
                 jobs_dir,
             });
             app.manage(state.clone());

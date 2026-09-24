@@ -3,6 +3,7 @@
 //! Read-only apart from `/print`: presets and the default printer can only be
 //! changed from the ix.print window, because this port is open to the network.
 
+use crate::application::ports::ServerControl;
 use crate::auth;
 use crate::callback::{self, Callback};
 use crate::config::PresetBundle;
@@ -875,7 +876,52 @@ fn security_headers() -> DefaultHeaders {
         .add(("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'"))
 }
 
-pub async fn run(state: Arc<AppState>) -> std::io::Result<()> {
+#[derive(Clone, Default)]
+pub struct HttpServerControl {
+    runtime: Arc<ServerRuntime>,
+}
+
+#[derive(Default)]
+struct ServerRuntime {
+    handle: std::sync::Mutex<Option<actix_web::dev::ServerHandle>>,
+    error: std::sync::Mutex<Option<String>>,
+}
+
+impl ServerControl for HttpServerControl {
+    fn start(&self, state: Arc<AppState>) {
+        let runtime = self.runtime.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = actix_web::rt::System::new().block_on(run_server(state.clone(), runtime.clone())) {
+                let msg = format!("Server port {} failed: {}", state.config.get().server_port, e);
+                eprintln!("{}", msg);
+                *runtime.error.lock_safe() = Some(msg);
+            }
+        });
+    }
+
+    fn stop(&self) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
+        Box::pin(async move {
+            let handle = self.runtime.handle.lock_safe().take();
+            if let Some(handle) = handle {
+                handle.stop(true).await;
+            }
+        })
+    }
+
+    fn is_running(&self) -> bool {
+        self.runtime.handle.lock_safe().is_some()
+    }
+
+    fn last_error(&self) -> Option<String> {
+        self.runtime.error.lock_safe().clone()
+    }
+
+    fn clear_error(&self) {
+        self.runtime.error.lock_safe().take();
+    }
+}
+
+async fn run_server(state: Arc<AppState>, runtime: Arc<ServerRuntime>) -> std::io::Result<()> {
     let config = state.config.get();
     if !config.bridge_enabled {
         return Ok(());
@@ -898,56 +944,23 @@ pub async fn run(state: Arc<AppState>) -> std::io::Result<()> {
     .max_connections(256)
     .bind((host, port))?
     .run();
-    *state.server_error.lock_safe() = None;
-    *state.server_handle.lock_safe() = Some(server.handle());
+    *runtime.error.lock_safe() = None;
+    *runtime.handle.lock_safe() = Some(server.handle());
     let result = server.await;
-    state.server_handle.lock_safe().take();
+    runtime.handle.lock_safe().take();
     result
 }
 
 /// Starts the bridge on its own Actix runtime so the Tauri window stays responsive.
 pub fn spawn(state: Arc<AppState>) {
-    std::thread::spawn(move || {
-        if let Err(e) = actix_web::rt::System::new().block_on(run(state.clone())) {
-            let msg = format!("Server port {} failed: {}", state.config.get().server_port, e);
-            eprintln!("{}", msg);
-            *state.server_error.lock_safe() = Some(msg);
-        }
-    });
+    state.server.start(state.clone());
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::ConfigStore;
-    use crate::history::History;
+    use crate::application::state::test_support::state;
     use actix_web::test;
-
-    fn state() -> Arc<AppState> {
-        let dir = std::env::temp_dir().join(format!("ixprint-srv-{}", uuid::Uuid::new_v4()));
-        let config = ConfigStore::load(&dir);
-        // Most tests exercise the endpoints themselves; token_protection turns tokens back on.
-        config
-            .update(|c| {
-                c.require_token = false;
-                Ok(())
-            })
-            .unwrap();
-        Arc::new(AppState {
-            config,
-            desktop_key: "test-desktop-key".into(),
-            remotes: crate::remote::RemoteStore::load(&dir),
-            remote_cache: Default::default(),
-            server_error: Default::default(),
-            server_handle: Default::default(),
-            token_usage: Default::default(),
-            in_flight: Default::default(),
-            failed_auth: Default::default(),
-            history: History::new(dir.join("history")),
-            diagnostics: crate::diagnostics::Diagnostics::new(&dir),
-            jobs_dir: dir.join("jobs"),
-        })
-    }
 
     #[actix_web::test]
     async fn contract_all_routes_registered() {
@@ -1030,12 +1043,12 @@ mod tests {
         .unwrap();
         state
             .config
-            .update(|c| {
+            .update(&mut |c| {
                 c.presets.insert(
                     "label".into(),
                     crate::config::Preset {
                         settings: Default::default(),
-                        design: Some(design),
+                        design: Some(design.clone()),
                     },
                 );
                 c.presets.insert("a4".into(), Default::default());
@@ -1127,7 +1140,7 @@ mod tests {
         let state = state();
         state
             .config
-            .update(|c| {
+            .update(&mut |c| {
                 c.require_token = true;
                 Ok(())
             })
@@ -1162,12 +1175,12 @@ mod tests {
         .unwrap();
         state
             .config
-            .update(|c| {
+            .update(&mut |c| {
                 c.presets.insert(
                     "label".into(),
                     crate::config::Preset {
                         settings: Default::default(),
-                        design: Some(design),
+                        design: Some(design.clone()),
                     },
                 );
                 Ok(())
@@ -1230,7 +1243,7 @@ mod tests {
 
         state
             .config
-            .update(|c| {
+            .update(&mut |c| {
                 c.allowed_origins = vec!["https://simrs.example".into()];
                 Ok(())
             })
@@ -1242,7 +1255,7 @@ mod tests {
 
         state
             .config
-            .update(|c| {
+            .update(&mut |c| {
                 c.allowed_origins = vec!["*".into()];
                 Ok(())
             })
@@ -1274,7 +1287,7 @@ mod tests {
         // Required with no token yet: everything is refused, with a hint to create one.
         state
             .config
-            .update(|c| {
+            .update(&mut |c| {
                 c.require_token = true;
                 Ok(())
             })
@@ -1284,8 +1297,8 @@ mod tests {
         let id = stored.id.clone();
         state
             .config
-            .update(|c| {
-                c.tokens.push(stored);
+            .update(&mut |c| {
+                c.tokens.push(stored.clone());
                 c.require_token = true;
                 Ok(())
             })
@@ -1358,7 +1371,7 @@ mod tests {
         // Revoked token stops working.
         state
             .config
-            .update(|c| {
+            .update(&mut |c| {
                 c.tokens.clear();
                 Ok(())
             })

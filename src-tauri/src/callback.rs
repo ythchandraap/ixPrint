@@ -392,6 +392,12 @@ fn deliver(callback: &Callback, payload: &Payload, mut progress: impl FnMut(&str
     }
 }
 
+pub(crate) fn deliver_with(callback: &Callback, payload: &Payload, progress: &mut dyn FnMut(&str, u32, &Attempt)) {
+    deliver(callback, payload, |state, attempts, outcome| {
+        progress(state, attempts, outcome)
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -506,21 +512,7 @@ mod tests {
     #[test]
     fn delivers_signed_result_of_failed_job() {
         let _lock = LOOPBACK_TEST_LOCK.lock().unwrap();
-        let dir = std::env::temp_dir().join(format!("ixprint-cb-{}", uuid::Uuid::new_v4()));
-        let state = Arc::new(AppState {
-            config: crate::config::ConfigStore::load(&dir),
-            desktop_key: "test-desktop-key".into(),
-            remotes: crate::remote::RemoteStore::load(&dir),
-            remote_cache: Default::default(),
-            server_error: Default::default(),
-            server_handle: Default::default(),
-            token_usage: Default::default(),
-            in_flight: Default::default(),
-            failed_auth: Default::default(),
-            history: crate::history::History::new(dir.join("history")),
-            diagnostics: crate::diagnostics::Diagnostics::new(&dir),
-            jobs_dir: dir.join("jobs"),
-        });
+        let state = crate::application::state::test_support::state();
         let job = JobResult {
             job_id: "job-1".into(),
             printer: "EPSON".into(),
@@ -560,7 +552,7 @@ mod tests {
             reference: Some("ORDER-42".into()),
             key: stored.hash.clone(),
         };
-        let history = crate::history::History::new(dir.join("history"));
+        let history = state.history.clone();
         ALLOW_LOOPBACK_FOR_TESTS.store(true, Ordering::SeqCst);
         let _loopback_override = LoopbackTestOverride;
         watch(state, &job, cb).unwrap();
@@ -603,7 +595,6 @@ mod tests {
             (Some("failed"), 1, Some(200))
         );
         assert_eq!(cb.reference.as_deref(), Some("ORDER-42"));
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

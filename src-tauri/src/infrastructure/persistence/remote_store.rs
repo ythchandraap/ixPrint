@@ -1,3 +1,4 @@
+use crate::application::ports::RemoteRepository;
 use crate::domain::remote::{validate_all, CacheEntry, Remote};
 use crate::shared::sync::RwLockExt;
 use std::collections::HashMap;
@@ -8,6 +9,16 @@ use std::sync::{Mutex, RwLock};
 pub struct RemoteStore {
     path: PathBuf,
     data: RwLock<Vec<Remote>>,
+}
+
+impl RemoteRepository for RemoteStore {
+    fn list(&self) -> Vec<Remote> {
+        RemoteStore::list(self)
+    }
+
+    fn update(&self, change: &mut dyn FnMut(&mut Vec<Remote>) -> Result<(), String>) -> Result<Vec<Remote>, String> {
+        RemoteStore::update(self, |remotes| change(remotes))
+    }
 }
 
 pub type RemoteCache = Mutex<HashMap<String, CacheEntry>>;
