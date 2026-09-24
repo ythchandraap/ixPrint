@@ -181,6 +181,7 @@ pub fn run() {
                 server_error: Default::default(),
                 server_handle: Default::default(),
                 token_usage: Default::default(),
+                in_flight: Default::default(),
                 failed_auth: Default::default(),
                 history,
                 diagnostics,

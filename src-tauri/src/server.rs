@@ -12,6 +12,7 @@ use crate::settings::PrintSettings;
 use crate::sync::LockExt;
 use actix_cors::Cors;
 use actix_multipart::Multipart;
+use actix_web::http::header::HeaderValue;
 use actix_web::middleware::DefaultHeaders;
 use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Responder};
 use futures::StreamExt;
@@ -104,6 +105,36 @@ fn authorize(req: &HttpRequest, state: &AppState) -> Result<Option<auth::ApiToke
         )),
         None => Ok(None),
     }
+}
+
+fn acquire_in_flight<'a>(
+    state: &'a AppState,
+    req: &HttpRequest,
+    token: Option<&auth::ApiToken>,
+) -> Result<Option<auth::InFlightGuard<'a>>, HttpResponse> {
+    let desktop_key = req.headers().get("x-ixprint-desktop").and_then(|v| v.to_str().ok());
+    let is_desktop = req.method() == actix_web::http::Method::POST
+        && req.path() == "/print"
+        && req.peer_addr().is_some_and(|addr| addr.ip().is_loopback())
+        && desktop_key.is_some_and(|key| crate::auth::ct_eq(key.as_bytes(), state.desktop_key.as_bytes()));
+    if is_desktop {
+        return Ok(None);
+    }
+
+    let key = token
+        .map(|token| token.id.clone())
+        .or_else(|| req.peer_addr().map(|addr| format!("ip:{}", addr.ip())))
+        .unwrap_or_else(|| "ip:unknown".into());
+    state.in_flight.acquire(&key).map(Some).ok_or_else(|| {
+        let mut response = error(
+            actix_web::http::StatusCode::TOO_MANY_REQUESTS,
+            "Too many print requests in progress for this client; retry shortly",
+        );
+        response
+            .headers_mut()
+            .insert(actix_web::http::header::RETRY_AFTER, HeaderValue::from_static("2"));
+        response
+    })
 }
 
 macro_rules! authorized {
@@ -541,6 +572,10 @@ async fn submit_data(
 /// Older endpoint: `{"template": name, "data": …}` where the template is now a preset with a design.
 async fn print_template(req: HttpRequest, state: State, body: web::Bytes) -> HttpResponse {
     let token = authorized!(req, state);
+    let _in_flight = match acquire_in_flight(state.get_ref().as_ref(), &req, token.as_ref()) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
     let body: LegacyTemplatePrint = match serde_json::from_slice(&body) {
         Ok(b) => b,
         Err(e) => {
@@ -655,6 +690,10 @@ async fn print(
     mut payload: web::Payload,
 ) -> HttpResponse {
     let token = authorized!(req, state);
+    let _in_flight = match acquire_in_flight(state.get_ref().as_ref(), &req, token.as_ref()) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
     let is_json = req
         .headers()
         .get("content-type")
@@ -742,6 +781,10 @@ fn callback_from_query(
 /// settings `/print` would use.
 async fn test_page(req: HttpRequest, state: State, query: web::Query<HashMap<String, String>>) -> HttpResponse {
     let token = authorized!(req, state);
+    let _in_flight = match acquire_in_flight(state.get_ref().as_ref(), &req, token.as_ref()) {
+        Ok(guard) => guard,
+        Err(response) => return response,
+    };
     let (settings, preset) = match PrintSettings::from_query(&query) {
         Ok(v) => v,
         Err(e) => return error(actix_web::http::StatusCode::BAD_REQUEST, &e),
@@ -898,6 +941,7 @@ mod tests {
             server_error: Default::default(),
             server_handle: Default::default(),
             token_usage: Default::default(),
+            in_flight: Default::default(),
             failed_auth: Default::default(),
             history: History::new(dir.join("history")),
             diagnostics: crate::diagnostics::Diagnostics::new(&dir),
@@ -937,6 +981,26 @@ mod tests {
                 "{method} {path}"
             );
         }
+    }
+
+    #[actix_web::test]
+    async fn in_flight_limit_returns_retry_after() {
+        let state = state();
+        let _guards: Vec<_> = (0..auth::MAX_IN_FLIGHT_PER_CLIENT)
+            .map(|_| state.in_flight.acquire("ip:127.0.0.1").unwrap())
+            .collect();
+        let app = test::init_service(App::new().app_data(web::Data::new(state.clone())).configure(routes)).await;
+        let peer: std::net::SocketAddr = "127.0.0.1:4000".parse().unwrap();
+        let request = test::TestRequest::post().uri("/test-page").peer_addr(peer).to_request();
+        let response = test::call_service(&app, request).await;
+
+        assert_eq!(response.status().as_u16(), 429);
+        assert_eq!(response.headers().get("Retry-After").unwrap(), "2");
+        let body: serde_json::Value = test::read_body_json(response).await;
+        assert_eq!(
+            body["message"],
+            "Too many print requests in progress for this client; retry shortly"
+        );
     }
 
     #[actix_web::test]
