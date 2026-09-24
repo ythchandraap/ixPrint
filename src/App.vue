@@ -8,7 +8,7 @@ import PrintersTab from "@/features/printers/PrintersTab.vue";
 import PresetsTab from "@/features/presets/PresetsTab.vue";
 import HistoryTab from "@/features/history/HistoryTab.vue";
 import PrintTab from "@/features/print/PrintTab.vue";
-import ErrorLogPanel from "./components/ErrorLogPanel.vue";
+import ErrorLogPanel from "@/features/diagnostics/ErrorLogPanel.vue";
 import SettingsView from "@/features/settings/SettingsView.vue";
 import EmptyState from "./components/EmptyState.vue";
 import OnboardingDialog from "@/features/settings/OnboardingDialog.vue";
