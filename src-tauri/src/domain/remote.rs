@@ -1,7 +1,7 @@
 use crate::domain::auth;
+use crate::domain::job::JobError;
 use crate::domain::printer;
 use crate::domain::settings::PrintSettings;
-use crate::job::JobError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;

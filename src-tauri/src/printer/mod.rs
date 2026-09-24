@@ -1,7 +1,4 @@
-//! Compatibility facade for printer types and OS operations.
+//! Compatibility facade retained for the local printer test probe.
 
-pub use crate::domain::printer::*;
-#[allow(unused_imports)]
-pub use crate::infrastructure::printing::os_default_printer;
-pub use crate::infrastructure::printing::{capabilities, default_paper_mm, job_status, list_printers, print, queue};
-pub mod manage;
+#[cfg(test)]
+pub use crate::infrastructure::printing::capabilities;

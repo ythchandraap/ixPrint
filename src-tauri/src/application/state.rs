@@ -285,6 +285,10 @@ pub mod test_support {
     struct UnavailablePdf;
 
     impl PdfEngine for UnavailablePdf {
+        fn engine_status(&self) -> Result<(), String> {
+            Err("PDF engine unavailable in test state".into())
+        }
+
         fn build_layout(
             &self,
             _source: &Path,
@@ -322,6 +326,7 @@ pub mod test_support {
         fn test_page(&self, _path: &Path, _w: f32, _h: f32, _info: &[String], _pages: u32) -> Result<(), String> {
             Err("PDF engine unavailable in test state".into())
         }
+        fn remove_generated_file(&self, _path: &Path) {}
     }
 
     #[derive(Default)]

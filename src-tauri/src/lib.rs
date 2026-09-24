@@ -13,6 +13,7 @@ mod diagnostics;
 mod history;
 mod job;
 mod layout;
+#[cfg(test)]
 mod printer;
 mod remote;
 mod server;

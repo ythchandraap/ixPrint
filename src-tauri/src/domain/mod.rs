@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod diagnostics;
 pub mod history;
+pub mod job;
 pub mod layout;
 pub mod preset;
 pub mod printer;
