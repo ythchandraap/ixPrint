@@ -785,6 +785,39 @@ mod tests {
     }
 
     #[actix_web::test]
+    async fn contract_all_routes_registered() {
+        let app = test::init_service(
+            App::new().app_data(web::Data::new(state())).configure(routes),
+        )
+        .await;
+
+        let routes = [
+            ("GET", "/"),
+            ("GET", "/docs"),
+            ("GET", "/list-printer"),
+            ("GET", "/printer-capabilities"),
+            ("GET", "/queue"),
+            ("GET", "/job-status"),
+            ("GET", "/presets"),
+            ("GET", "/presets/export"),
+            ("POST", "/print"),
+            ("POST", "/test-page"),
+            ("GET", "/templates"),
+            ("POST", "/print-template"),
+        ];
+
+        for (method, path) in routes {
+            let request = match method {
+                "GET" => test::TestRequest::get().uri(path).to_request(),
+                "POST" => test::TestRequest::post().uri(path).to_request(),
+                _ => unreachable!(),
+            };
+            let response = test::call_service(&app, request).await;
+            assert_ne!(response.status(), actix_web::http::StatusCode::NOT_FOUND, "{method} {path}");
+        }
+    }
+
+    #[actix_web::test]
     async fn json_print_validation() {
         let state = state();
         let app = test::init_service(
