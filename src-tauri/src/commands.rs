@@ -17,9 +17,7 @@ use tauri::State;
 type AppStateRef<'a> = State<'a, Arc<AppState>>;
 
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
-    tauri::async_runtime::spawn_blocking(f)
-        .await
-        .map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(f).await.map_err(|e| e.to_string())
 }
 
 /// Opens the API documentation served at `/docs`, in its own window or the browser.
@@ -81,7 +79,7 @@ pub fn os_detected() -> String {
 #[tauri::command]
 pub fn server_status(state: AppStateRef<'_>) -> Result<(), String> {
     if !state.config.get().bridge_enabled {
-		return Err("The application bridge is disabled".into());
+        return Err("The application bridge is disabled".into());
     }
     match state.server_error.lock().unwrap().clone() {
         Some(e) => Err(e),
@@ -97,14 +95,14 @@ pub fn bridge_enabled(state: AppStateRef<'_>) -> bool {
 /// Enables or gracefully stops the local HTTP bridge while keeping the app open.
 #[tauri::command]
 pub async fn set_bridge_enabled(state: AppStateRef<'_>, enabled: bool) -> Result<Config, String> {
-	set_bridge_enabled_inner(state.inner().clone(), enabled).await
+    set_bridge_enabled_inner(state.inner().clone(), enabled).await
 }
 
 /// Shared by the window command and the system-tray action.
 pub async fn set_bridge_enabled_inner(state: Arc<AppState>, enabled: bool) -> Result<Config, String> {
-	state.config.update(|c| {
-		c.bridge_enabled = enabled;
-		Ok(())
+    state.config.update(|c| {
+        c.bridge_enabled = enabled;
+        Ok(())
     })?;
 
     if enabled {
@@ -148,18 +146,28 @@ pub async fn set_server_port(state: AppStateRef<'_>, port: u16) -> Result<Config
     Ok(next)
 }
 
-fn remote_from_form(name: String, url: String, token: String, preset: Option<String>, existing: Option<&Remote>) -> Result<Remote, String> {
+fn remote_from_form(
+    name: String,
+    url: String,
+    token: String,
+    preset: Option<String>,
+    existing: Option<&Remote>,
+) -> Result<Remote, String> {
     remote::validate_name(&name)?;
     let url = remote::normalize_url(&url)?;
     let token = token.trim().to_string();
     remote::validate_token(&token)?;
     Ok(Remote {
-        id: existing.map(|r| r.id.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+        id: existing
+            .map(|r| r.id.clone())
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
         name,
         url,
         token,
         preset: preset.filter(|p| !p.trim().is_empty()).map(|p| p.trim().to_string()),
-        created_at: existing.map(|r| r.created_at.clone()).unwrap_or_else(|| chrono::Local::now().to_rfc3339()),
+        created_at: existing
+            .map(|r| r.created_at.clone())
+            .unwrap_or_else(|| chrono::Local::now().to_rfc3339()),
     })
 }
 
@@ -204,7 +212,12 @@ pub async fn remote_update(
     preset: Option<String>,
 ) -> Result<Vec<RemoteView>, String> {
     let state = state.inner().clone();
-    let old = state.remotes.list().into_iter().find(|r| r.id == id).ok_or("Remote computer was not found")?;
+    let old = state
+        .remotes
+        .list()
+        .into_iter()
+        .find(|r| r.id == id)
+        .ok_or("Remote computer was not found")?;
     let remote = remote_from_form(name, url, token.unwrap_or(old.token.clone()), preset, Some(&old))?;
     let tested = remote.clone();
     let io_state = state.clone();
@@ -213,7 +226,10 @@ pub async fn remote_update(
         return Err(error);
     }
     state.remotes.update(|list| {
-        let item = list.iter_mut().find(|r| r.id == id).ok_or("Remote computer was not found")?;
+        let item = list
+            .iter_mut()
+            .find(|r| r.id == id)
+            .ok_or("Remote computer was not found")?;
         *item = remote.clone();
         Ok(())
     })?;
@@ -229,7 +245,10 @@ pub async fn remote_update(
                 }
             };
             rename(&mut config.default_printer);
-            config.presets.values_mut().for_each(|p| rename(&mut p.settings.printer));
+            config
+                .presets
+                .values_mut()
+                .for_each(|p| rename(&mut p.settings.printer));
             Ok(())
         })?;
     }
@@ -238,14 +257,23 @@ pub async fn remote_update(
 
 #[tauri::command]
 pub fn remote_remove(state: AppStateRef<'_>, id: String) -> Result<Vec<RemoteView>, String> {
-    let remote = state.remotes.list().into_iter().find(|r| r.id == id).ok_or("Remote computer was not found")?;
+    let remote = state
+        .remotes
+        .list()
+        .into_iter()
+        .find(|r| r.id == id)
+        .ok_or("Remote computer was not found")?;
     state.remotes.update(|list| {
         list.retain(|r| r.id != id);
         Ok(())
     })?;
     state.remote_cache.lock().unwrap().remove(&id);
     state.config.update(|config| {
-        if config.default_printer.as_deref().is_some_and(|p| p == remote.name || p.starts_with(&format!("{}{}", remote.name, remote::SEPARATOR))) {
+        if config
+            .default_printer
+            .as_deref()
+            .is_some_and(|p| p == remote.name || p.starts_with(&format!("{}{}", remote.name, remote::SEPARATOR)))
+        {
             config.default_printer = None;
         }
         Ok(())
@@ -256,11 +284,17 @@ pub fn remote_remove(state: AppStateRef<'_>, id: String) -> Result<Vec<RemoteVie
 #[tauri::command]
 pub async fn remote_test(state: AppStateRef<'_>, id: String) -> Result<RemoteView, String> {
     let state = state.inner().clone();
-    let remote = state.remotes.list().into_iter().find(|r| r.id == id).ok_or("Remote computer was not found")?;
+    let remote = state
+        .remotes
+        .list()
+        .into_iter()
+        .find(|r| r.id == id)
+        .ok_or("Remote computer was not found")?;
     blocking(move || {
         remote::refresh_printers(&state, &remote, true);
         remote::view(&remote, &state.remote_cache)
-    }).await
+    })
+    .await
 }
 
 /// `Err` with the reason when PDFium could not be loaded.
@@ -285,7 +319,8 @@ pub async fn get_capabilities(state: AppStateRef<'_>, printer: String) -> Result
             Target::Unknown => Err(format!("Printer '{}' was not found on this computer", printer)),
             Target::Remote { remote, printer } => remote::capabilities(&remote, &printer).map_err(|e| e.to_string()),
         }
-    }).await?
+    })
+    .await?
 }
 
 #[tauri::command]
@@ -296,13 +331,17 @@ pub async fn get_queue(state: AppStateRef<'_>, printer: String) -> Result<printe
         match remote::resolve(&local, &state.remotes.list(), &printer) {
             Target::Local(name) => printer::queue(&name),
             Target::Unknown => Err(format!("Printer '{}' was not found on this computer", printer)),
-            Target::Remote { remote, printer: remote_printer } => {
+            Target::Remote {
+                remote,
+                printer: remote_printer,
+            } => {
                 let mut queue = remote::queue(&remote, &remote_printer).map_err(|e| e.to_string())?;
                 queue.printer = printer;
                 Ok(queue)
             }
         }
-    }).await?
+    })
+    .await?
 }
 
 /// Live status of a job printed through ix.print (see `/job-status`).
@@ -311,7 +350,7 @@ pub async fn job_status(state: AppStateRef<'_>, job_id: String) -> Result<serde_
     let state = state.inner().clone();
     blocking(move || job_status_json(&state, &job_id))
         .await?
-		.ok_or_else(|| "Job not found".to_string())
+        .ok_or_else(|| "Job not found".to_string())
 }
 
 /// Sends the desktop form through the same authenticated HTTP endpoint used by
@@ -397,14 +436,18 @@ fn submit_to_print_endpoint(
     let body = response.body_mut().read_to_string().unwrap_or_default();
     let value: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
     if !status.is_success() {
-        let message = value.get("message").and_then(serde_json::Value::as_str).unwrap_or("The print service rejected the request");
+        let message = value
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("The print service rejected the request");
         return Err(if status.as_u16() == 401 {
             "The desktop print request was denied. Restart ix.print and try again.".into()
         } else {
             format!("Print request failed (HTTP {}): {}", status, message)
         });
     }
-    serde_json::from_value(value).map_err(|_| "The print service returned an unreadable job result. Check History before retrying.".into())
+    serde_json::from_value(value)
+        .map_err(|_| "The print service returned an unreadable job result. Check History before retrying.".into())
 }
 
 fn encode_query(value: &str) -> String {
@@ -460,7 +503,11 @@ fn render_pdf_sheet_preview(
     let merged = preset_settings.overlay(&settings);
     merged.validate()?;
 
-    let printer_name = merged.printer.clone().or_else(|| state.default_printer()).unwrap_or_default();
+    let printer_name = merged
+        .printer
+        .clone()
+        .or_else(|| state.default_printer())
+        .unwrap_or_default();
     let job = crate::settings::JobSettings::resolve(&merged, printer_name.clone());
     let default_paper = if job.paper == crate::settings::Paper::PrinterDefault && !printer_name.is_empty() {
         printer::default_paper_mm(&printer_name)
@@ -476,7 +523,10 @@ fn render_pdf_sheet_preview(
             .load_pdf_from_file(&tmp, None)
             .map_err(|e| format!("Could not open the laid-out sheet: {}", e))?;
         let png = crate::template::render_page_png(&doc, 0, 6.0)?;
-        Ok(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png)))
+        Ok(format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(png)
+        ))
     })();
     let _ = std::fs::remove_file(&tmp);
     result
@@ -553,12 +603,16 @@ async fn reject_remote_printer(state: Arc<AppState>, name: &str) -> Result<(), S
     let name = name.to_string();
     blocking(move || {
         let local = printer::list_printers().into_iter().map(|p| p.name).collect::<Vec<_>>();
-        if matches!(remote::resolve(&local, &state.remotes.list(), &name), Target::Remote { .. }) {
+        if matches!(
+            remote::resolve(&local, &state.remotes.list(), &name),
+            Target::Remote { .. }
+        ) {
             Err("Printers of another ix.print are managed on that computer".into())
         } else {
             Ok(())
         }
-    }).await?
+    })
+    .await?
 }
 
 #[tauri::command]
@@ -595,7 +649,7 @@ pub fn save_preset(
     state.config.update(|c| {
         if let Some(original) = original_name.filter(|o| o != &name) {
             if c.presets.contains_key(&name) {
-				return Err(format!("Preset '{}' already exists", name));
+                return Err(format!("Preset '{}' already exists", name));
             }
             c.presets.remove(&original);
             if c.default_preset.as_ref() == Some(&original) {
@@ -622,7 +676,12 @@ pub async fn preview_print(
         blocking(move || crate::template::pages_png(&template, &records, &template.sample, 6, scale)).await??;
     let urls = pages
         .into_iter()
-        .map(|png| format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png)))
+        .map(|png| {
+            format!(
+                "data:image/png;base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(png)
+            )
+        })
         .collect();
     Ok((urls, total))
 }
@@ -637,7 +696,10 @@ pub async fn preview_template(
     use base64::Engine;
     let scale = px_per_mm.unwrap_or(8.0).clamp(1.0, 24.0);
     let png = blocking(move || crate::template::preview_png(&template, &data, scale)).await??;
-    Ok(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png)))
+    Ok(format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(png)
+    ))
 }
 
 #[tauri::command]
@@ -738,7 +800,7 @@ pub fn export_presets(
 fn json_file(path: &str) -> Result<(), String> {
     let p = std::path::Path::new(path);
     if !p.is_absolute() || !p.extension().is_some_and(|e| e.eq_ignore_ascii_case("json")) {
-		return Err("Preset file must be a .json file".into());
+        return Err("Preset file must be a .json file".into());
     }
     Ok(())
 }
@@ -747,9 +809,11 @@ const MAX_BUNDLE_BYTES: u64 = 50 * 1024 * 1024;
 
 fn read_bundle(path: &str) -> Result<PresetBundle, String> {
     json_file(path)?;
-    let size = std::fs::metadata(path).map_err(|e| format!("Gagal membaca {}: {}", path, e))?.len();
+    let size = std::fs::metadata(path)
+        .map_err(|e| format!("Gagal membaca {}: {}", path, e))?
+        .len();
     if size > MAX_BUNDLE_BYTES {
-		return Err("Preset file is too large".into());
+        return Err("Preset file is too large".into());
     }
     let text = std::fs::read_to_string(path).map_err(|e| format!("Gagal membaca {}: {}", path, e))?;
     PresetBundle::parse(&text)
@@ -759,10 +823,7 @@ fn read_bundle(path: &str) -> Result<PresetBundle, String> {
 pub async fn preview_import(state: AppStateRef<'_>, path: String) -> Result<ImportPreview, String> {
     let bundle = read_bundle(&path)?;
     let config = state.config.get();
-    let installed = blocking(|| {
-        printer::list_printers().into_iter().map(|p| p.name).collect::<Vec<_>>()
-    })
-    .await?;
+    let installed = blocking(|| printer::list_printers().into_iter().map(|p| p.name).collect::<Vec<_>>()).await?;
     Ok(config::preview_import(&bundle, &config, &installed))
 }
 
@@ -773,11 +834,7 @@ pub struct ImportOutcome {
 }
 
 #[tauri::command]
-pub fn apply_import(
-    state: AppStateRef<'_>,
-    path: String,
-    options: ImportOptions,
-) -> Result<ImportOutcome, String> {
+pub fn apply_import(state: AppStateRef<'_>, path: String, options: ImportOptions) -> Result<ImportOutcome, String> {
     let bundle = read_bundle(&path)?;
     let mut imported = Vec::new();
     let config = state.config.update(|c| {
@@ -850,9 +907,14 @@ pub async fn test_print(
 ) -> Result<JobResult, String> {
     let state = state.inner().clone();
     let request = JobRequest {
-        document: Document::TestPage { pages: pages.unwrap_or(1) },
+        document: Document::TestPage {
+            pages: pages.unwrap_or(1),
+        },
         file_name: "ix.print test page.pdf".into(),
-        settings: PrintSettings { printer, ..Default::default() },
+        settings: PrintSettings {
+            printer,
+            ..Default::default()
+        },
         preset: preset.filter(|p| !p.is_empty()),
         source: "app",
         client: None,
@@ -881,22 +943,34 @@ mod desktop_print_tests {
             loop {
                 let mut chunk = [0; 8192];
                 let read = stream.read(&mut chunk).unwrap();
-                if read == 0 { break; }
+                if read == 0 {
+                    break;
+                }
                 request.extend_from_slice(&chunk[..read]);
-                let Some(split) = request.windows(4).position(|w| w == b"\r\n\r\n") else { continue };
+                let Some(split) = request.windows(4).position(|w| w == b"\r\n\r\n") else {
+                    continue;
+                };
                 let headers = String::from_utf8_lossy(&request[..split]).to_ascii_lowercase();
                 let body = &request[split + 4..];
                 let complete = if let Some(len) = headers.lines().find_map(|line| {
-                    line.strip_prefix("content-length:").and_then(|v| v.trim().parse::<usize>().ok())
+                    line.strip_prefix("content-length:")
+                        .and_then(|v| v.trim().parse::<usize>().ok())
                 }) {
                     body.len() >= len
                 } else {
                     body.windows(5).any(|w| w == b"0\r\n\r\n")
                 };
-                if complete { break; }
+                if complete {
+                    break;
+                }
             }
             let body = br#"{"job_id":"mock-job","printer":"Mock printer","sheets":3}"#;
-            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .unwrap();
             stream.write_all(body).unwrap();
             request
         });
@@ -906,7 +980,12 @@ mod desktop_print_tests {
     fn mock_state(port: u16) -> AppState {
         let dir = std::env::temp_dir().join(format!("ixprint-app-post-{}", uuid::Uuid::new_v4()));
         let config = crate::config::ConfigStore::load(&dir);
-        config.update(|c| { c.server_port = port; Ok(()) }).unwrap();
+        config
+            .update(|c| {
+                c.server_port = port;
+                Ok(())
+            })
+            .unwrap();
         AppState {
             config,
             desktop_key: "private-test-key".into(),
@@ -935,14 +1014,19 @@ mod desktop_print_tests {
         for copies in [1, 4] {
             let (port, server) = mock_endpoint();
             let state = mock_state(port);
-            let body = format!(r#"{{"preset":"label","data":{{"name":"Example"}},"settings":{{"copies":{}}}}}"#, copies);
+            let body = format!(
+                r#"{{"preset":"label","data":{{"name":"Example"}},"settings":{{"copies":{}}}}}"#,
+                copies
+            );
             let result = submit_to_print_endpoint(&state, Some(body), None, None, PrintSettings::default()).unwrap();
             let (headers, payload) = headers_and_body(&server.join().unwrap());
             assert_eq!(result.job_id, "mock-job");
             assert_eq!(result.sheets, 3);
             assert!(headers.starts_with("POST /print HTTP/1.1"));
             assert!(headers.to_ascii_lowercase().contains("content-type: application/json"));
-            assert!(headers.to_ascii_lowercase().contains("x-ixprint-desktop: private-test-key"));
+            assert!(headers
+                .to_ascii_lowercase()
+                .contains("x-ixprint-desktop: private-test-key"));
             assert!(payload.contains(&format!("\"copies\":{}", copies)));
         }
 
@@ -953,7 +1037,11 @@ mod desktop_print_tests {
         for copies in [1, 4] {
             let (port, server) = mock_endpoint();
             let state = mock_state(port);
-            let settings = PrintSettings { copies: Some(copies), printer: Some("Mock Printer / 1".into()), ..Default::default() };
+            let settings = PrintSettings {
+                copies: Some(copies),
+                printer: Some("Mock Printer / 1".into()),
+                ..Default::default()
+            };
             let result = submit_to_print_endpoint(
                 &state,
                 None,
@@ -968,8 +1056,12 @@ mod desktop_print_tests {
             assert!(headers.contains("preset=receipt"));
             assert!(headers.contains(&format!("copies={}", copies)));
             assert!(headers.contains("printer=Mock%20Printer%20%2F%201"));
-            assert!(headers.to_ascii_lowercase().contains("content-type: multipart/form-data; boundary="));
-            assert!(headers.to_ascii_lowercase().contains("x-ixprint-desktop: private-test-key"));
+            assert!(headers
+                .to_ascii_lowercase()
+                .contains("content-type: multipart/form-data; boundary="));
+            assert!(headers
+                .to_ascii_lowercase()
+                .contains("x-ixprint-desktop: private-test-key"));
             assert!(payload.contains("filename=\"source.pdf\""));
             assert!(payload.contains("%PDF-1.4"));
         }
@@ -1016,7 +1108,11 @@ mod preview_pdf_tests {
         };
         let url = render_pdf_sheet_preview(&state, pdf.to_str().unwrap(), None, settings).unwrap();
         assert!(url.starts_with("data:image/png;base64,"));
-        let png = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &url["data:image/png;base64,".len()..]).unwrap();
+        let png = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            &url["data:image/png;base64,".len()..],
+        )
+        .unwrap();
         let mut decoder = png::Decoder::new(png.as_slice());
         decoder.set_transformations(png::Transformations::normalize_to_color8());
         let reader = decoder.read_info().unwrap();
@@ -1028,7 +1124,13 @@ mod preview_pdf_tests {
         assert!(err.contains(".pdf"));
 
         // Unknown preset: rejected before rendering.
-        let err = render_pdf_sheet_preview(&state, pdf.to_str().unwrap(), Some("nope".into()), PrintSettings::default()).unwrap_err();
+        let err = render_pdf_sheet_preview(
+            &state,
+            pdf.to_str().unwrap(),
+            Some("nope".into()),
+            PrintSettings::default(),
+        )
+        .unwrap_err();
         assert!(err.contains("was not found"));
 
         // Temp file cleaned up either way.

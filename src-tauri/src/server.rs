@@ -37,7 +37,10 @@ fn error(status: actix_web::http::StatusCode, message: &str) -> HttpResponse {
 /// Logs an internal failure and answers without its details (paths, OS errors).
 fn internal(e: impl std::fmt::Display) -> HttpResponse {
     eprintln!("[ix.print] internal error: {}", e);
-	error(actix_web::http::StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred in ix.print")
+    error(
+        actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+        "An internal error occurred in ix.print",
+    )
 }
 
 fn unauthorized(message: &str) -> HttpResponse {
@@ -62,7 +65,9 @@ fn authorize(req: &HttpRequest, state: &AppState) -> Result<Option<auth::ApiToke
     if let Some(wait) = ip.and_then(|ip| state.failed_auth.locked(ip)) {
         return Err(HttpResponse::TooManyRequests()
             .insert_header(("Retry-After", wait.as_secs().max(1).to_string()))
-			.json(Message { message: "Too many incorrect tokens from this address; try again later" }));
+            .json(Message {
+                message: "Too many incorrect tokens from this address; try again later",
+            }));
     }
     let config = state.config.get();
     let header = |name: &str| req.headers().get(name).and_then(|v| v.to_str().ok());
@@ -78,21 +83,23 @@ fn authorize(req: &HttpRequest, state: &AppState) -> Result<Option<auth::ApiToke
                 if let Some(ip) = ip {
                     state.failed_auth.succeed(ip);
                 }
-                state.token_usage.record(&t.id, req.peer_addr().map(|a| a.ip().to_string()));
+                state
+                    .token_usage
+                    .record(&t.id, req.peer_addr().map(|a| a.ip().to_string()));
                 Ok(Some(t.clone()))
             }
             None => {
                 if let Some(ip) = ip {
                     state.failed_auth.fail(ip);
                 }
-				Err(unauthorized("Token is invalid or has been revoked"))
+                Err(unauthorized("Token is invalid or has been revoked"))
             }
         },
         None if config.require_token && config.tokens.is_empty() => Err(unauthorized(
-			"A token is required, but none exists: create one in ix.print → Settings → API",
+            "A token is required, but none exists: create one in ix.print → Settings → API",
         )),
         None if config.require_token => Err(unauthorized(
-			"A token is required: send the 'Authorization: Bearer <token>' header (create one in ix.print → API)",
+            "A token is required: send the 'Authorization: Bearer <token>' header (create one in ix.print → API)",
         )),
         None => Ok(None),
     }
@@ -139,7 +146,12 @@ pub fn printer_views(state: &AppState, include_remote: bool) -> Vec<PrinterView>
                 .flat_map(|handle| handle.join().unwrap_or_default())
                 .map(|printer| PrinterView {
                     is_default: default.as_deref() == Some(printer.name.as_str()),
-                    remote: remotes.iter().find_map(|r| printer.name.strip_prefix(&format!("{}{}", r.name, crate::remote::SEPARATOR)).map(|_| r.name.clone())),
+                    remote: remotes.iter().find_map(|r| {
+                        printer
+                            .name
+                            .strip_prefix(&format!("{}{}", r.name, crate::remote::SEPARATOR))
+                            .map(|_| r.name.clone())
+                    }),
                     printer,
                 })
                 .collect::<Vec<_>>()
@@ -206,17 +218,31 @@ async fn capabilities(req: HttpRequest, state: State, query: web::Query<HashMap<
     let state = state.get_ref().clone();
     let requested = query.get("printer").filter(|p| !p.trim().is_empty()).cloned();
     let Some(name) = requested.or_else(|| state.default_printer()) else {
-		return error(actix_web::http::StatusCode::BAD_REQUEST, "parameter 'printer' is required");
+        return error(
+            actix_web::http::StatusCode::BAD_REQUEST,
+            "parameter 'printer' is required",
+        );
     };
     match web::block(move || {
         let local_names = printer::list_printers().into_iter().map(|p| p.name).collect::<Vec<_>>();
         match crate::remote::resolve(&local_names, &state.remotes.list(), &name) {
             crate::remote::Target::Local(name) => printer::capabilities(&name).map_err(LookupError::NotFound),
-            crate::remote::Target::Unknown => Err(LookupError::NotFound(format!("Printer '{}' was not found on this computer", name))),
-            crate::remote::Target::Remote { .. } if hop => Err(LookupError::Remote(crate::remote::RemoteError::BadRequest("Forwarding between ix.print computers is limited to one hop".into()))),
-            crate::remote::Target::Remote { remote, printer } => crate::remote::capabilities(&remote, &printer).map_err(LookupError::Remote),
+            crate::remote::Target::Unknown => Err(LookupError::NotFound(format!(
+                "Printer '{}' was not found on this computer",
+                name
+            ))),
+            crate::remote::Target::Remote { .. } if hop => {
+                Err(LookupError::Remote(crate::remote::RemoteError::BadRequest(
+                    "Forwarding between ix.print computers is limited to one hop".into(),
+                )))
+            }
+            crate::remote::Target::Remote { remote, printer } => {
+                crate::remote::capabilities(&remote, &printer).map_err(LookupError::Remote)
+            }
         }
-    }).await {
+    })
+    .await
+    {
         Ok(Ok(caps)) => HttpResponse::Ok().json(caps),
         Ok(Err(LookupError::NotFound(e))) => error(actix_web::http::StatusCode::NOT_FOUND, &e),
         Ok(Err(LookupError::Remote(e))) => remote_error_response(e),
@@ -230,21 +256,33 @@ async fn queue(req: HttpRequest, state: State, query: web::Query<HashMap<String,
     let state = state.get_ref().clone();
     let requested = query.get("printer").filter(|p| !p.trim().is_empty()).cloned();
     let Some(name) = requested.or_else(|| state.default_printer()) else {
-		return error(actix_web::http::StatusCode::BAD_REQUEST, "parameter 'printer' is required");
+        return error(
+            actix_web::http::StatusCode::BAD_REQUEST,
+            "parameter 'printer' is required",
+        );
     };
     match web::block(move || {
         let local_names = printer::list_printers().into_iter().map(|p| p.name).collect::<Vec<_>>();
         match crate::remote::resolve(&local_names, &state.remotes.list(), &name) {
             crate::remote::Target::Local(name) => printer::queue(&name).map_err(LookupError::NotFound),
-            crate::remote::Target::Unknown => Err(LookupError::NotFound(format!("Printer '{}' was not found on this computer", name))),
-            crate::remote::Target::Remote { .. } if hop => Err(LookupError::Remote(crate::remote::RemoteError::BadRequest("Forwarding between ix.print computers is limited to one hop".into()))),
+            crate::remote::Target::Unknown => Err(LookupError::NotFound(format!(
+                "Printer '{}' was not found on this computer",
+                name
+            ))),
+            crate::remote::Target::Remote { .. } if hop => {
+                Err(LookupError::Remote(crate::remote::RemoteError::BadRequest(
+                    "Forwarding between ix.print computers is limited to one hop".into(),
+                )))
+            }
             crate::remote::Target::Remote { remote, printer } => {
                 let mut queue = crate::remote::queue(&remote, &printer).map_err(LookupError::Remote)?;
                 queue.printer = name.clone();
                 Ok(queue)
             }
         }
-    }).await {
+    })
+    .await
+    {
         Ok(Ok(q)) => HttpResponse::Ok().json(q),
         Ok(Err(LookupError::NotFound(e))) => error(actix_web::http::StatusCode::NOT_FOUND, &e),
         Ok(Err(LookupError::Remote(e))) => remote_error_response(e),
@@ -267,9 +305,13 @@ pub fn job_status_json(state: &AppState, job_id: &str) -> Option<serde_json::Val
         let mut status = match state.remotes.list().into_iter().find(|r| r.id == remote_job.remote_id) {
             Some(remote) => match crate::remote::job_status(&remote, &remote_job.job_id) {
                 Ok(status) => status,
-                Err(error) => serde_json::json!({ "state": "unknown", "message": error.to_string(), "remote_unreachable": true }),
+                Err(error) => {
+                    serde_json::json!({ "state": "unknown", "message": error.to_string(), "remote_unreachable": true })
+                }
             },
-            None => serde_json::json!({ "state": "unknown", "message": format!("Remote '{}' was removed", remote_job.remote_name) }),
+            None => {
+                serde_json::json!({ "state": "unknown", "message": format!("Remote '{}' was removed", remote_job.remote_name) })
+            }
         };
         if let Some(object) = status.as_object_mut() {
             object.insert("job_id".into(), serde_json::json!(entry.id));
@@ -278,7 +320,11 @@ pub fn job_status_json(state: &AppState, job_id: &str) -> Option<serde_json::Val
         }
         status
     } else {
-        match entry.spooler_job.as_deref().map(|id| printer::job_status(&entry.printer, id)) {
+        match entry
+            .spooler_job
+            .as_deref()
+            .map(|id| printer::job_status(&entry.printer, id))
+        {
             Some(Ok(s)) => serde_json::to_value(s).unwrap_or_default(),
             Some(Err(e)) => serde_json::json!({ "state": "unknown", "message": e }),
             None => serde_json::json!({ "state": "unknown" }),
@@ -294,12 +340,15 @@ pub fn job_status_json(state: &AppState, job_id: &str) -> Option<serde_json::Val
 async fn job_status(req: HttpRequest, state: State, query: web::Query<HashMap<String, String>>) -> HttpResponse {
     authorized!(req, state);
     let Some(job_id) = query.get("job_id").cloned() else {
-		return error(actix_web::http::StatusCode::BAD_REQUEST, "parameter 'job_id' is required");
+        return error(
+            actix_web::http::StatusCode::BAD_REQUEST,
+            "parameter 'job_id' is required",
+        );
     };
     let state = state.get_ref().clone();
     match web::block(move || job_status_json(&state, &job_id)).await {
         Ok(Some(v)) => HttpResponse::Ok().json(v),
-		Ok(None) => error(actix_web::http::StatusCode::NOT_FOUND, "job not found"),
+        Ok(None) => error(actix_web::http::StatusCode::NOT_FOUND, "job not found"),
         Err(e) => internal(e),
     }
 }
@@ -418,9 +467,10 @@ async fn submit(
             HttpResponse::Ok().json(body)
         }
         Ok(Err(JobError::BadRequest(m))) => error(actix_web::http::StatusCode::BAD_REQUEST, &m),
-        Ok(Err(JobError::Failed(m))) => {
-            error(actix_web::http::StatusCode::INTERNAL_SERVER_ERROR, &format!("Print failed: {}", m))
-        }
+        Ok(Err(JobError::Failed(m))) => error(
+            actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("Print failed: {}", m),
+        ),
         Err(e) => internal(e),
     }
 }
@@ -461,7 +511,7 @@ async fn submit_data(
     };
     let request = JobRequest {
         file_name: format!(
-			"design {} ({} item(s))",
+            "design {} ({} item(s))",
             preset.as_deref().unwrap_or("default preset"),
             records.len()
         ),
@@ -481,16 +531,31 @@ async fn print_template(req: HttpRequest, state: State, body: web::Bytes) -> Htt
     let token = authorized!(req, state);
     let body: LegacyTemplatePrint = match serde_json::from_slice(&body) {
         Ok(b) => b,
-		Err(e) => return error(actix_web::http::StatusCode::BAD_REQUEST, &format!("JSON body is invalid: {}", e)),
+        Err(e) => {
+            return error(
+                actix_web::http::StatusCode::BAD_REQUEST,
+                &format!("JSON body is invalid: {}", e),
+            )
+        }
     };
     if body.preset.as_ref().is_some_and(|p| p != &body.template) {
         return error(
             actix_web::http::StatusCode::BAD_REQUEST,
-			"A template is now a preset with a design: send only \"template\" (or use POST /print with \"preset\")",
+            "A template is now a preset with a design: send only \"template\" (or use POST /print with \"preset\")",
         );
     }
     let callback = (body.callback_url, body.callback_ref);
-    submit_data(&req, &state, token, Some(body.template), body.data, body.header, body.settings, callback).await
+    submit_data(
+        &req,
+        &state,
+        token,
+        Some(body.template),
+        body.data,
+        body.header,
+        body.settings,
+        callback,
+    )
+    .await
 }
 
 async fn presets(req: HttpRequest, state: State) -> HttpResponse {
@@ -507,10 +572,7 @@ async fn export_presets(req: HttpRequest, state: State) -> HttpResponse {
     authorized!(req, state);
     let bundle = PresetBundle::from_config(&state.config.get(), None, true);
     HttpResponse::Ok()
-        .insert_header((
-            "Content-Disposition",
-            "attachment; filename=\"ix.print-presets.json\"",
-        ))
+        .insert_header(("Content-Disposition", "attachment; filename=\"ix.print-presets.json\""))
         .json(bundle)
 }
 
@@ -521,7 +583,7 @@ async fn save_upload(
 ) -> Result<(std::path::PathBuf, String), HttpResponse> {
     let bad = |m: &str| error(actix_web::http::StatusCode::BAD_REQUEST, m);
     while let Some(item) = multipart.next().await {
-		let mut field = item.map_err(|e| bad(&format!("Multipart data is invalid: {}", e)))?;
+        let mut field = item.map_err(|e| bad(&format!("Multipart data is invalid: {}", e)))?;
         let Some(name) = field
             .content_disposition()
             .and_then(|cd| cd.get_filename())
@@ -539,7 +601,10 @@ async fn save_upload(
                 let data = chunk.map_err(|e| bad(&format!("Upload terputus: {}", e)))?;
                 size += data.len();
                 if size > MAX_UPLOAD_BYTES {
-                    return Err(error(actix_web::http::StatusCode::PAYLOAD_TOO_LARGE, "File terlalu besar"));
+                    return Err(error(
+                        actix_web::http::StatusCode::PAYLOAD_TOO_LARGE,
+                        "File terlalu besar",
+                    ));
                 }
                 let room = PDF_HEADER_WINDOW - head.len();
                 head.extend_from_slice(&data[..room.min(data.len())]);
@@ -547,7 +612,7 @@ async fn save_upload(
             }
             // Only PDFs go on to PDFium; anything else is refused before parsing.
             if !head.windows(5).any(|w| w == b"%PDF-") {
-				return Err(bad("File is not a PDF"));
+                return Err(bad("File is not a PDF"));
             }
             Ok(())
         }
@@ -557,7 +622,11 @@ async fn save_upload(
             let _ = std::fs::remove_file(&path);
             return Err(resp);
         }
-        let name = if name.is_empty() { "unnamed.pdf".to_string() } else { name };
+        let name = if name.is_empty() {
+            "unnamed.pdf".to_string()
+        } else {
+            name
+        };
         return Ok((path, name));
     }
     Err(bad("No file uploaded"))
@@ -583,16 +652,31 @@ async fn print(
         while let Some(chunk) = payload.next().await {
             match chunk {
                 Ok(c) if body.len() + c.len() <= MAX_JSON_BYTES => body.extend_from_slice(&c),
-				Ok(_) => return error(actix_web::http::StatusCode::PAYLOAD_TOO_LARGE, "JSON body is too large"),
+                Ok(_) => return error(actix_web::http::StatusCode::PAYLOAD_TOO_LARGE, "JSON body is too large"),
                 Err(e) => return error(actix_web::http::StatusCode::BAD_REQUEST, &e.to_string()),
             }
         }
         let body: DataPrint = match serde_json::from_slice(&body) {
             Ok(b) => b,
-			Err(e) => return error(actix_web::http::StatusCode::BAD_REQUEST, &format!("JSON body is invalid: {}", e)),
+            Err(e) => {
+                return error(
+                    actix_web::http::StatusCode::BAD_REQUEST,
+                    &format!("JSON body is invalid: {}", e),
+                )
+            }
         };
         let callback = (body.callback_url, body.callback_ref);
-        return submit_data(&req, &state, token, body.preset, body.data, body.header, body.settings, callback).await;
+        return submit_data(
+            &req,
+            &state,
+            token,
+            body.preset,
+            body.data,
+            body.header,
+            body.settings,
+            callback,
+        )
+        .await;
     }
 
     let (settings, preset) = match PrintSettings::from_query(&query) {
@@ -618,7 +702,14 @@ async fn print(
         token: token.map(|t| t.name),
         hop: req.headers().contains_key(crate::remote::HOP_HEADER),
     };
-    submit(state.get_ref().clone(), request, "File uploaded and sent to printer", Some(file), callback).await
+    submit(
+        state.get_ref().clone(),
+        request,
+        "File uploaded and sent to printer",
+        Some(file),
+        callback,
+    )
+    .await
 }
 
 /// `callback_url` / `callback_ref` from the query of an upload or test page.
@@ -663,7 +754,14 @@ async fn test_page(req: HttpRequest, state: State, query: web::Query<HashMap<Str
         token: token.map(|t| t.name),
         hop: req.headers().contains_key(crate::remote::HOP_HEADER),
     };
-    submit(state.get_ref().clone(), request, "Test page sent to printer", None, callback).await
+    submit(
+        state.get_ref().clone(),
+        request,
+        "Test page sent to printer",
+        None,
+        callback,
+    )
+    .await
 }
 
 /// Registers every route; shared by the server and the tests.
@@ -750,7 +848,7 @@ pub async fn run(state: Arc<AppState>) -> std::io::Result<()> {
 pub fn spawn(state: Arc<AppState>) {
     std::thread::spawn(move || {
         if let Err(e) = actix_web::rt::System::new().block_on(run(state.clone())) {
-			let msg = format!("Server port {} failed: {}", state.config.get().server_port, e);
+            let msg = format!("Server port {} failed: {}", state.config.get().server_port, e);
             eprintln!("{}", msg);
             *state.server_error.lock().unwrap() = Some(msg);
         }
@@ -768,7 +866,12 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ixprint-srv-{}", uuid::Uuid::new_v4()));
         let config = ConfigStore::load(&dir);
         // Most tests exercise the endpoints themselves; token_protection turns tokens back on.
-        config.update(|c| { c.require_token = false; Ok(()) }).unwrap();
+        config
+            .update(|c| {
+                c.require_token = false;
+                Ok(())
+            })
+            .unwrap();
         Arc::new(AppState {
             config,
             desktop_key: "test-desktop-key".into(),
@@ -786,10 +889,7 @@ mod tests {
 
     #[actix_web::test]
     async fn contract_all_routes_registered() {
-        let app = test::init_service(
-            App::new().app_data(web::Data::new(state())).configure(routes),
-        )
-        .await;
+        let app = test::init_service(App::new().app_data(web::Data::new(state())).configure(routes)).await;
 
         let routes = [
             ("GET", "/"),
@@ -813,17 +913,18 @@ mod tests {
                 _ => unreachable!(),
             };
             let response = test::call_service(&app, request).await;
-            assert_ne!(response.status(), actix_web::http::StatusCode::NOT_FOUND, "{method} {path}");
+            assert_ne!(
+                response.status(),
+                actix_web::http::StatusCode::NOT_FOUND,
+                "{method} {path}"
+            );
         }
     }
 
     #[actix_web::test]
     async fn json_print_validation() {
         let state = state();
-        let app = test::init_service(
-            App::new().app_data(web::Data::new(state.clone())).configure(routes),
-        )
-        .await;
+        let app = test::init_service(App::new().app_data(web::Data::new(state.clone())).configure(routes)).await;
         let call = |uri: &'static str, body: &'static str| {
             let app = &app;
             async move {
@@ -848,7 +949,13 @@ mod tests {
         state
             .config
             .update(|c| {
-                c.presets.insert("label".into(), crate::config::Preset { settings: Default::default(), design: Some(design) });
+                c.presets.insert(
+                    "label".into(),
+                    crate::config::Preset {
+                        settings: Default::default(),
+                        design: Some(design),
+                    },
+                );
                 c.presets.insert("a4".into(), Default::default());
                 Ok(())
             })
@@ -856,14 +963,30 @@ mod tests {
 
         for (uri, body, expect) in [
             ("/print", "{not json", "JSON"),
-            ("/print", r#"{"preset":"label","data":{},"nama":"extra"}"#, "unknown field"),
+            (
+                "/print",
+                r#"{"preset":"label","data":{},"nama":"extra"}"#,
+                "unknown field",
+            ),
             ("/print", r#"{"preset":"label","data":{"a":[1]}}"#, "data"),
             ("/print", r#"{"preset":"missing","data":{"name":"A"}}"#, "was not found"),
             ("/print", r#"{"preset":"a4","data":{"name":"A"}}"#, "No printer"),
             ("/print", r#"{"data":{"name":"A"}}"#, "No printer"),
-            ("/print", r#"{"preset":"label","data":{"nama":"A"},"callback_url":"https://a.id/cb"}"#, "token"),
-            ("/print-template", r#"{"template":"missing","data":{"name":"A"}}"#, "was not found"),
-            ("/print-template", r#"{"template":"label","preset":"a4","data":{}}"#, "preset"),
+            (
+                "/print",
+                r#"{"preset":"label","data":{"nama":"A"},"callback_url":"https://a.id/cb"}"#,
+                "token",
+            ),
+            (
+                "/print-template",
+                r#"{"template":"missing","data":{"name":"A"}}"#,
+                "was not found",
+            ),
+            (
+                "/print-template",
+                r#"{"template":"label","preset":"a4","data":{}}"#,
+                "preset",
+            ),
         ] {
             let (code, msg) = call(uri, body).await;
             assert_eq!(code, 400, "{} {} → {}", uri, body, msg);
@@ -905,10 +1028,7 @@ mod tests {
     #[actix_web::test]
     async fn test_page_rejects_oversized_custom_paper() {
         let state = state();
-        let app = test::init_service(
-            App::new().app_data(web::Data::new(state)).configure(routes),
-        )
-        .await;
+        let app = test::init_service(App::new().app_data(web::Data::new(state)).configure(routes)).await;
         let req = test::TestRequest::post()
             .uri("/test-page?paper=50000x50000mm")
             .to_request();
@@ -923,11 +1043,14 @@ mod tests {
         use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
         let state = state();
-        state.config.update(|c| { c.require_token = true; Ok(()) }).unwrap();
-        let app = test::init_service(
-            App::new().app_data(web::Data::new(state.clone())).configure(routes),
-        )
-        .await;
+        state
+            .config
+            .update(|c| {
+                c.require_token = true;
+                Ok(())
+            })
+            .unwrap();
+        let app = test::init_service(App::new().app_data(web::Data::new(state.clone())).configure(routes)).await;
 
         let local = test::TestRequest::post()
             .uri("/print")
@@ -958,14 +1081,17 @@ mod tests {
         state
             .config
             .update(|c| {
-                c.presets.insert("label".into(), crate::config::Preset { settings: Default::default(), design: Some(design) });
+                c.presets.insert(
+                    "label".into(),
+                    crate::config::Preset {
+                        settings: Default::default(),
+                        design: Some(design),
+                    },
+                );
                 Ok(())
             })
             .unwrap();
-        let app = test::init_service(
-            App::new().app_data(web::Data::new(state)).configure(routes),
-        )
-        .await;
+        let app = test::init_service(App::new().app_data(web::Data::new(state)).configure(routes)).await;
         let missing_printer = format!("__ixprint_missing_{}__", uuid::Uuid::new_v4());
         let payload = serde_json::json!({
             "preset": "label",
@@ -990,7 +1116,10 @@ mod tests {
     async fn browser_origins() {
         let state = state();
         let app = test::init_service(
-            App::new().wrap(cors(state.clone())).app_data(web::Data::new(state.clone())).configure(routes),
+            App::new()
+                .wrap(cors(state.clone()))
+                .app_data(web::Data::new(state.clone()))
+                .configure(routes),
         )
         .await;
         let status = |origin: &'static str| {
@@ -1009,25 +1138,40 @@ mod tests {
         assert_ne!(status("https://evil.example").await, 200);
         assert_eq!(status("http://192.168.1.6:18032").await, 200);
         // Requests without Origin (servers, curl) are not a CORS matter.
-        assert_eq!(test::call_service(&app, test::TestRequest::get().uri("/presets").to_request()).await.status().as_u16(), 200);
+        assert_eq!(
+            test::call_service(&app, test::TestRequest::get().uri("/presets").to_request())
+                .await
+                .status()
+                .as_u16(),
+            200
+        );
 
-        state.config.update(|c| { c.allowed_origins = vec!["https://simrs.example".into()]; Ok(()) }).unwrap();
+        state
+            .config
+            .update(|c| {
+                c.allowed_origins = vec!["https://simrs.example".into()];
+                Ok(())
+            })
+            .unwrap();
         assert_eq!(status("https://simrs.example").await, 200);
         assert_eq!(status("https://SIMRS.example").await, 200);
         assert_ne!(status("https://simrs.example.evil.test").await, 200);
         assert_ne!(status("null").await, 200);
 
-        state.config.update(|c| { c.allowed_origins = vec!["*".into()]; Ok(()) }).unwrap();
+        state
+            .config
+            .update(|c| {
+                c.allowed_origins = vec!["*".into()];
+                Ok(())
+            })
+            .unwrap();
         assert_eq!(status("https://anything.example").await, 200);
     }
 
     #[actix_web::test]
     async fn token_protection() {
         let state = state();
-        let app = test::init_service(
-            App::new().app_data(web::Data::new(state.clone())).configure(routes),
-        )
-        .await;
+        let app = test::init_service(App::new().app_data(web::Data::new(state.clone())).configure(routes)).await;
         let status = |req: test::TestRequest| {
             let app = &app;
             async move { test::call_service(app, req.to_request()).await.status().as_u16() }
@@ -1036,19 +1180,43 @@ mod tests {
         // Tokens optional: open, but a wrong token is still rejected.
         assert_eq!(status(test::TestRequest::get().uri("/presets")).await, 200);
         assert_eq!(
-            status(test::TestRequest::get().uri("/presets").insert_header(("Authorization", "Bearer fxp_nope"))).await,
+            status(
+                test::TestRequest::get()
+                    .uri("/presets")
+                    .insert_header(("Authorization", "Bearer fxp_nope"))
+            )
+            .await,
             401
         );
 
         // Required with no token yet: everything is refused, with a hint to create one.
-        state.config.update(|c| { c.require_token = true; Ok(()) }).unwrap();
+        state
+            .config
+            .update(|c| {
+                c.require_token = true;
+                Ok(())
+            })
+            .unwrap();
         assert_eq!(status(test::TestRequest::get().uri("/presets")).await, 401);
         let (token, stored) = crate::auth::generate("SIMRS").unwrap();
         let id = stored.id.clone();
-        state.config.update(|c| { c.tokens.push(stored); c.require_token = true; Ok(()) }).unwrap();
+        state
+            .config
+            .update(|c| {
+                c.tokens.push(stored);
+                c.require_token = true;
+                Ok(())
+            })
+            .unwrap();
 
         // Required: every API endpoint needs it, in any of the three places.
-        for uri in ["/presets", "/presets/export", "/list-printer", "/queue?printer=x", "/job-status?job_id=x"] {
+        for uri in [
+            "/presets",
+            "/presets/export",
+            "/list-printer",
+            "/queue?printer=x",
+            "/job-status?job_id=x",
+        ] {
             assert_eq!(status(test::TestRequest::get().uri(uri)).await, 401, "{}", uri);
         }
         assert_eq!(status(test::TestRequest::post().uri("/print")).await, 401);
@@ -1056,9 +1224,28 @@ mod tests {
         assert_eq!(status(test::TestRequest::get().uri("/templates")).await, 401);
         assert_eq!(status(test::TestRequest::post().uri("/print-template")).await, 401);
         let bearer = format!("Bearer {}", token);
-        assert_eq!(status(test::TestRequest::get().uri("/presets").insert_header(("Authorization", bearer.as_str()))).await, 200);
-        assert_eq!(status(test::TestRequest::get().uri("/presets").insert_header(("X-Api-Token", token.as_str()))).await, 200);
-        assert_eq!(status(test::TestRequest::get().uri(&format!("/presets?token={}", token))).await, 200);
+        assert_eq!(
+            status(
+                test::TestRequest::get()
+                    .uri("/presets")
+                    .insert_header(("Authorization", bearer.as_str()))
+            )
+            .await,
+            200
+        );
+        assert_eq!(
+            status(
+                test::TestRequest::get()
+                    .uri("/presets")
+                    .insert_header(("X-Api-Token", token.as_str()))
+            )
+            .await,
+            200
+        );
+        assert_eq!(
+            status(test::TestRequest::get().uri(&format!("/presets?token={}", token))).await,
+            200
+        );
         assert!(state.token_usage.snapshot().contains_key(&id));
 
         // Health check and docs stay public.
@@ -1068,17 +1255,40 @@ mod tests {
         // Repeated wrong tokens lock the client out, even with a valid token afterwards.
         let attacker: std::net::SocketAddr = "10.0.0.66:5000".parse().unwrap();
         for _ in 0..10 {
-            let req = test::TestRequest::get().uri("/presets").peer_addr(attacker).insert_header(("X-Api-Token", "fxp_guess"));
+            let req = test::TestRequest::get()
+                .uri("/presets")
+                .peer_addr(attacker)
+                .insert_header(("X-Api-Token", "fxp_guess"));
             assert_eq!(status(req).await, 401);
         }
-        let req = test::TestRequest::get().uri("/presets").peer_addr(attacker).insert_header(("Authorization", bearer.as_str()));
+        let req = test::TestRequest::get()
+            .uri("/presets")
+            .peer_addr(attacker)
+            .insert_header(("Authorization", bearer.as_str()));
         assert_eq!(status(req).await, 429);
         let other: std::net::SocketAddr = "10.0.0.67:5000".parse().unwrap();
-        let req = test::TestRequest::get().uri("/presets").peer_addr(other).insert_header(("Authorization", bearer.as_str()));
+        let req = test::TestRequest::get()
+            .uri("/presets")
+            .peer_addr(other)
+            .insert_header(("Authorization", bearer.as_str()));
         assert_eq!(status(req).await, 200);
 
         // Revoked token stops working.
-        state.config.update(|c| { c.tokens.clear(); Ok(()) }).unwrap();
-        assert_eq!(status(test::TestRequest::get().uri("/presets").insert_header(("Authorization", bearer.as_str()))).await, 401);
+        state
+            .config
+            .update(|c| {
+                c.tokens.clear();
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            status(
+                test::TestRequest::get()
+                    .uri("/presets")
+                    .insert_header(("Authorization", bearer.as_str()))
+            )
+            .await,
+            401
+        );
     }
 }

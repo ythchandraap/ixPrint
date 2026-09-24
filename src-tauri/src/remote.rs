@@ -135,7 +135,10 @@ impl RemoteStore {
                 Vec::new()
             }
         };
-        RemoteStore { path, data: RwLock::new(list) }
+        RemoteStore {
+            path,
+            data: RwLock::new(list),
+        }
     }
 
     pub fn list(&self) -> Vec<Remote> {
@@ -190,7 +193,12 @@ fn write_atomic(path: &Path, remotes: &[Remote]) -> Result<(), String> {
 
 pub fn validate_name(name: &str) -> Result<(), String> {
     let trimmed = name.trim();
-    if trimmed != name || trimmed.is_empty() || trimmed.chars().count() > MAX_NAME || trimmed.contains('/') || trimmed.chars().any(|c| c.is_control()) {
+    if trimmed != name
+        || trimmed.is_empty()
+        || trimmed.chars().count() > MAX_NAME
+        || trimmed.contains('/')
+        || trimmed.chars().any(|c| c.is_control())
+    {
         return Err("Remote name must be 1–32 characters without '/'".into());
     }
     Ok(())
@@ -216,7 +224,12 @@ pub fn normalize_url(url: &str) -> Result<String, String> {
         let port = if rest.is_empty() {
             None
         } else {
-            Some(rest.strip_prefix(':').ok_or_else(bad)?.parse::<u16>().map_err(|_| bad())?)
+            Some(
+                rest.strip_prefix(':')
+                    .ok_or_else(bad)?
+                    .parse::<u16>()
+                    .map_err(|_| bad())?,
+            )
         };
         (host, port)
     } else if authority.matches(':').count() > 1 {
@@ -254,7 +267,10 @@ pub fn resolve(local: &[String], remotes: &[Remote], name: &str) -> Target {
             let prefix = format!("{}{}", remote.name, SEPARATOR);
             name.strip_prefix(&prefix)
                 .filter(|printer| !printer.is_empty())
-                .map(|printer| Target::Remote { remote: remote.clone(), printer: printer.to_string() })
+                .map(|printer| Target::Remote {
+                    remote: remote.clone(),
+                    printer: printer.to_string(),
+                })
         })
         .unwrap_or(Target::Unknown)
 }
@@ -282,34 +298,60 @@ fn response_message(body: &str, status: u16) -> String {
         .unwrap_or_else(|| format!("HTTP {}", status))
 }
 
-fn read_response<T: DeserializeOwned>(remote: &Remote, mut response: ureq::http::Response<ureq::Body>) -> Result<T, RemoteError> {
+fn read_response<T: DeserializeOwned>(
+    remote: &Remote,
+    mut response: ureq::http::Response<ureq::Body>,
+) -> Result<T, RemoteError> {
     let status = response.status().as_u16();
-    let body = response.body_mut().read_to_string().map_err(|e| request_error(remote, e))?;
+    let body = response
+        .body_mut()
+        .read_to_string()
+        .map_err(|e| request_error(remote, e))?;
     if (200..300).contains(&status) {
-        serde_json::from_str(&body).map_err(|e| RemoteError::Failed(format!("{} returned invalid JSON: {}", remote.name, e)))
+        serde_json::from_str(&body)
+            .map_err(|e| RemoteError::Failed(format!("{} returned invalid JSON: {}", remote.name, e)))
     } else {
         let message = response_message(&body, status);
         match status {
             400 | 404 => Err(RemoteError::BadRequest(format!("{}: {}", remote.name, message))),
-            401 => Err(RemoteError::Failed(format!("{}: token rejected — create a new token on that computer", remote.name))),
-            429 => Err(RemoteError::Failed(format!("{}: too many wrong tokens, try again later", remote.name))),
+            401 => Err(RemoteError::Failed(format!(
+                "{}: token rejected — create a new token on that computer",
+                remote.name
+            ))),
+            429 => Err(RemoteError::Failed(format!(
+                "{}: too many wrong tokens, try again later",
+                remote.name
+            ))),
             _ => Err(RemoteError::Failed(format!("{}: {}", remote.name, message))),
         }
     }
 }
 
-fn with_auth<'a>(request: ureq::RequestBuilder<ureq::typestate::WithBody>, remote: &'a Remote) -> ureq::RequestBuilder<ureq::typestate::WithBody> {
-    request.header("Authorization", format!("Bearer {}", remote.token)).header(HOP_HEADER, "1")
+fn with_auth<'a>(
+    request: ureq::RequestBuilder<ureq::typestate::WithBody>,
+    remote: &'a Remote,
+) -> ureq::RequestBuilder<ureq::typestate::WithBody> {
+    request
+        .header("Authorization", format!("Bearer {}", remote.token))
+        .header(HOP_HEADER, "1")
 }
 
-fn with_auth_no_body(request: ureq::RequestBuilder<ureq::typestate::WithoutBody>, remote: &Remote) -> ureq::RequestBuilder<ureq::typestate::WithoutBody> {
-    request.header("Authorization", format!("Bearer {}", remote.token)).header(HOP_HEADER, "1")
+fn with_auth_no_body(
+    request: ureq::RequestBuilder<ureq::typestate::WithoutBody>,
+    remote: &Remote,
+) -> ureq::RequestBuilder<ureq::typestate::WithoutBody> {
+    request
+        .header("Authorization", format!("Bearer {}", remote.token))
+        .header(HOP_HEADER, "1")
 }
 
 pub fn fetch_printers(remote: &Remote) -> Result<Vec<printer::Printer>, RemoteError> {
-    let response = with_auth_no_body(agent(Duration::from_secs(3)).get(format!("{}/list-printer", remote.url)), remote)
-        .call()
-        .map_err(|e| request_error(remote, e))?;
+    let response = with_auth_no_body(
+        agent(Duration::from_secs(3)).get(format!("{}/list-printer", remote.url)),
+        remote,
+    )
+    .call()
+    .map_err(|e| request_error(remote, e))?;
     let views: Vec<RemotePrinterView> = read_response(remote, response)?;
     Ok(views
         .into_iter()
@@ -348,20 +390,40 @@ pub fn refresh_printers(state: &AppState, remote: &Remote, force: bool) -> (Vec<
     if !force {
         if let Some(entry) = state.remote_cache.lock().unwrap().get(&remote.id) {
             if entry.fetched.elapsed() < CACHE_TTL {
-                return (map_printers(remote, &entry.printers, (!entry.ok_once).then_some(entry.error.as_deref().unwrap_or("Remote has not been reached"))), entry.error.clone());
+                return (
+                    map_printers(
+                        remote,
+                        &entry.printers,
+                        (!entry.ok_once).then_some(entry.error.as_deref().unwrap_or("Remote has not been reached")),
+                    ),
+                    entry.error.clone(),
+                );
             }
         }
     }
     match fetch_printers(remote) {
         Ok(list) => {
             let mut cache = state.remote_cache.lock().unwrap();
-            cache.insert(remote.id.clone(), CacheEntry { fetched: Instant::now(), printers: list.clone(), error: None, ok_once: true });
+            cache.insert(
+                remote.id.clone(),
+                CacheEntry {
+                    fetched: Instant::now(),
+                    printers: list.clone(),
+                    error: None,
+                    ok_once: true,
+                },
+            );
             (map_printers(remote, &list, None), None)
         }
         Err(error) => {
             let message = error.to_string();
             let mut cache = state.remote_cache.lock().unwrap();
-            let entry = cache.entry(remote.id.clone()).or_insert_with(|| CacheEntry { fetched: Instant::now(), printers: Vec::new(), error: None, ok_once: false });
+            let entry = cache.entry(remote.id.clone()).or_insert_with(|| CacheEntry {
+                fetched: Instant::now(),
+                printers: Vec::new(),
+                error: None,
+                ok_once: false,
+            });
             entry.fetched = Instant::now();
             entry.error = Some(message.clone());
             (map_printers(remote, &entry.printers, Some(&message)), Some(message))
@@ -390,26 +452,35 @@ pub fn views(store: &RemoteStore, cache: &RemoteCache) -> Vec<RemoteView> {
 }
 
 pub fn capabilities(remote: &Remote, name: &str) -> Result<printer::Capabilities, RemoteError> {
-    let response = with_auth_no_body(agent(Duration::from_secs(5)).get(format!("{}/printer-capabilities", remote.url)), remote)
-        .query("printer", name)
-        .call()
-        .map_err(|e| request_error(remote, e))?;
+    let response = with_auth_no_body(
+        agent(Duration::from_secs(5)).get(format!("{}/printer-capabilities", remote.url)),
+        remote,
+    )
+    .query("printer", name)
+    .call()
+    .map_err(|e| request_error(remote, e))?;
     read_response(remote, response)
 }
 
 pub fn queue(remote: &Remote, name: &str) -> Result<printer::PrinterQueue, RemoteError> {
-    let response = with_auth_no_body(agent(Duration::from_secs(5)).get(format!("{}/queue", remote.url)), remote)
-        .query("printer", name)
-        .call()
-        .map_err(|e| request_error(remote, e))?;
+    let response = with_auth_no_body(
+        agent(Duration::from_secs(5)).get(format!("{}/queue", remote.url)),
+        remote,
+    )
+    .query("printer", name)
+    .call()
+    .map_err(|e| request_error(remote, e))?;
     read_response(remote, response)
 }
 
 pub fn job_status(remote: &Remote, job_id: &str) -> Result<Value, RemoteError> {
-    let response = with_auth_no_body(agent(Duration::from_secs(5)).get(format!("{}/job-status", remote.url)), remote)
-        .query("job_id", job_id)
-        .call()
-        .map_err(|e| request_error(remote, e))?;
+    let response = with_auth_no_body(
+        agent(Duration::from_secs(5)).get(format!("{}/job-status", remote.url)),
+        remote,
+    )
+    .query("job_id", job_id)
+    .call()
+    .map_err(|e| request_error(remote, e))?;
     read_response(remote, response)
 }
 
@@ -428,7 +499,12 @@ pub fn settings_query(settings: &PrintSettings) -> Vec<(String, String)> {
         .collect()
 }
 
-pub fn print_pdf(remote: &Remote, path: &Path, file_name: &str, settings: &PrintSettings) -> Result<RemotePrintResult, RemoteError> {
+pub fn print_pdf(
+    remote: &Remote,
+    path: &Path,
+    file_name: &str,
+    settings: &PrintSettings,
+) -> Result<RemotePrintResult, RemoteError> {
     let size = fs::metadata(path).map_err(|e| request_error(remote, e))?.len();
     if size > crate::server::MAX_UPLOAD_BYTES as u64 {
         return Err(RemoteError::BadRequest("PDF file is too large".into()));
@@ -440,8 +516,11 @@ pub fn print_pdf(remote: &Remote, path: &Path, file_name: &str, settings: &Print
     body.extend_from_slice(format!("--{}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{}\"\r\nContent-Type: application/pdf\r\n\r\n", boundary, safe_name).as_bytes());
     body.extend_from_slice(&bytes);
     body.extend_from_slice(format!("\r\n--{}--\r\n", boundary).as_bytes());
-    let mut request = with_auth(agent(Duration::from_secs(120)).post(format!("{}/print", remote.url)), remote)
-        .header("Content-Type", format!("multipart/form-data; boundary={}", boundary));
+    let mut request = with_auth(
+        agent(Duration::from_secs(120)).post(format!("{}/print", remote.url)),
+        remote,
+    )
+    .header("Content-Type", format!("multipart/form-data; boundary={}", boundary));
     if let Some(preset) = &remote.preset {
         request = request.query("preset", preset);
     }
@@ -453,8 +532,11 @@ pub fn print_pdf(remote: &Remote, path: &Path, file_name: &str, settings: &Print
 }
 
 pub fn test_page(remote: &Remote, pages: u32, settings: &PrintSettings) -> Result<RemotePrintResult, RemoteError> {
-    let mut request = with_auth(agent(Duration::from_secs(60)).post(format!("{}/test-page", remote.url)), remote)
-        .query("count", pages.to_string());
+    let mut request = with_auth(
+        agent(Duration::from_secs(60)).post(format!("{}/test-page", remote.url)),
+        remote,
+    )
+    .query("count", pages.to_string());
     if let Some(preset) = &remote.preset {
         request = request.query("preset", preset);
     }
@@ -483,12 +565,17 @@ pub fn forward(
         match &req.document {
             Document::File(path) => print_pdf(remote, path, &req.file_name, &settings),
             Document::Data { records, header } => {
-                let design = preset.design.as_ref().ok_or_else(|| RemoteError::BadRequest(match preset_name {
-                    Some(name) => format!("Preset '{}' has no design; send a PDF instead of JSON data", name),
-                    None => "Specify a preset with a design in the \"preset\" field".into(),
-                }))?;
+                let design = preset.design.as_ref().ok_or_else(|| {
+                    RemoteError::BadRequest(match preset_name {
+                        Some(name) => format!("Preset '{}' has no design; send a PDF instead of JSON data", name),
+                        None => "Specify a preset with a design in the \"preset\" field".into(),
+                    })
+                })?;
                 if records.len() > crate::template::MAX_RECORDS {
-                    return Err(RemoteError::BadRequest(format!("at most {} records per job", crate::template::MAX_RECORDS)));
+                    return Err(RemoteError::BadRequest(format!(
+                        "at most {} records per job",
+                        crate::template::MAX_RECORDS
+                    )));
                 }
                 crate::template::render(&generated, design, records, header).map_err(RemoteError::BadRequest)?;
                 design_settings(&mut settings, design, false);
@@ -497,7 +584,8 @@ pub fn forward(
             Document::TestPage { pages } if preset.design.is_some() => {
                 let design = preset.design.as_ref().unwrap();
                 let records = vec![design.sample.clone(); (*pages).clamp(1, crate::testpage::MAX_TEST_PAGES) as usize];
-                crate::template::render(&generated, design, &records, &design.sample).map_err(RemoteError::BadRequest)?;
+                crate::template::render(&generated, design, &records, &design.sample)
+                    .map_err(RemoteError::BadRequest)?;
                 design_settings(&mut settings, design, true);
                 print_pdf(remote, &generated, &req.file_name, &settings)
             }
@@ -508,7 +596,11 @@ pub fn forward(
     let result = result.map_err(RemoteError::into_job_error)?;
     record.settings = serde_json::to_value(&settings).unwrap_or_default();
     record.sheets = result.sheets;
-    record.remote = Some(RemoteJob { remote_id: remote.id.clone(), remote_name: remote.name.clone(), job_id: result.job_id.clone() });
+    record.remote = Some(RemoteJob {
+        remote_id: remote.id.clone(),
+        remote_name: remote.name.clone(),
+        job_id: result.job_id.clone(),
+    });
     Ok(JobResult {
         job_id: job_id.to_string(),
         printer: format!("{}{}{}", remote.name, SEPARATOR, remote_printer),
@@ -536,14 +628,27 @@ mod tests {
     use crate::settings::{Margins, Paper};
 
     fn remote(name: &str) -> Remote {
-        Remote { id: uuid::Uuid::new_v4().to_string(), name: name.into(), url: "http://pc2.local:18032".into(), token: "fxp_test-token".into(), preset: None, created_at: chrono::Local::now().to_rfc3339() }
+        Remote {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: name.into(),
+            url: "http://pc2.local:18032".into(),
+            token: "fxp_test-token".into(),
+            preset: None,
+            created_at: chrono::Local::now().to_rfc3339(),
+        }
     }
 
     #[test]
     fn normalizes_urls_and_rejects_paths() {
         assert_eq!(normalize_url("http://192.168.1.7").unwrap(), "http://192.168.1.7:18032");
-        assert_eq!(normalize_url("HTTP://PC2.local:18032/").unwrap(), "http://pc2.local:18032");
-        assert_eq!(normalize_url("https://print.contoh.id").unwrap(), "https://print.contoh.id");
+        assert_eq!(
+            normalize_url("HTTP://PC2.local:18032/").unwrap(),
+            "http://pc2.local:18032"
+        );
+        assert_eq!(
+            normalize_url("https://print.contoh.id").unwrap(),
+            "https://print.contoh.id"
+        );
         for value in ["192.168.1.7", "http://a/b", "http://u:p@a", "ftp://a"] {
             assert!(normalize_url(value).is_err(), "{}", value);
         }
@@ -557,8 +662,13 @@ mod tests {
             assert!(validate_name(value).is_err(), "{}", value);
         }
         let r = remote("PC2");
-        assert_eq!(resolve(&["PC2 / EPSON".into()], std::slice::from_ref(&r), "PC2 / EPSON"), Target::Local("PC2 / EPSON".into()));
-        assert!(matches!(resolve(&[], std::slice::from_ref(&r), "PC2 / EPSON"), Target::Remote { printer, .. } if printer == "EPSON"));
+        assert_eq!(
+            resolve(&["PC2 / EPSON".into()], std::slice::from_ref(&r), "PC2 / EPSON"),
+            Target::Local("PC2 / EPSON".into())
+        );
+        assert!(
+            matches!(resolve(&[], std::slice::from_ref(&r), "PC2 / EPSON"), Target::Remote { printer, .. } if printer == "EPSON")
+        );
         assert_eq!(resolve(&[], std::slice::from_ref(&r), "PC2 / "), Target::Unknown);
         assert_eq!(resolve(&[], std::slice::from_ref(&r), "pc2 / EPSON"), Target::Unknown);
     }
@@ -569,7 +679,12 @@ mod tests {
             copies: Some(2),
             paper: Some(Paper::Roll { width_mm: 80.0 }),
             offset_x: Some(1.5),
-            margins: Some(Margins { top: 5.0, right: 3.0, bottom: 5.0, left: 3.0 }),
+            margins: Some(Margins {
+                top: 5.0,
+                right: 3.0,
+                bottom: 5.0,
+                left: 3.0,
+            }),
             collate: Some(false),
             scale: Some(Scale::Percent(90.0)),
             ..Default::default()
@@ -584,9 +699,19 @@ mod tests {
     fn store_survives_reload_and_rejects_duplicates() {
         let dir = std::env::temp_dir().join(format!("ixprint-remote-{}", uuid::Uuid::new_v4()));
         let store = RemoteStore::load(&dir);
-        store.update(|list| { list.push(remote("PC2")); Ok(()) }).unwrap();
+        store
+            .update(|list| {
+                list.push(remote("PC2"));
+                Ok(())
+            })
+            .unwrap();
         assert_eq!(RemoteStore::load(&dir).list().len(), 1);
-        assert!(store.update(|list| { list.push(remote("pc2")); Ok(()) }).is_err());
+        assert!(store
+            .update(|list| {
+                list.push(remote("pc2"));
+                Ok(())
+            })
+            .is_err());
         fs::write(dir.join("remotes.json"), "broken").unwrap();
         assert!(RemoteStore::load(&dir).list().is_empty());
         let _ = fs::remove_dir_all(dir);

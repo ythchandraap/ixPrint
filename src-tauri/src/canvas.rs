@@ -20,20 +20,11 @@ impl Canvas<'_, '_> {
         )
     }
 
-    pub fn line(
-        &mut self,
-        x1: f32,
-        y1: f32,
-        x2: f32,
-        y2: f32,
-        width_pt: f32,
-        gray: u8,
-    ) -> Result<(), PdfiumError> {
+    pub fn line(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, width_pt: f32, gray: u8) -> Result<(), PdfiumError> {
         let (ax, ay) = self.pt(x1, y1);
         let (bx, by) = self.pt(x2, y2);
         let color = PdfColor::new(gray, gray, gray, 255);
-        let obj =
-            PdfPagePathObject::new_line(self.doc, ax, ay, bx, by, color, PdfPoints::new(width_pt))?;
+        let obj = PdfPagePathObject::new_line(self.doc, ax, ay, bx, by, color, PdfPoints::new(width_pt))?;
         self.page.objects_mut().add_path_object(obj)?;
         Ok(())
     }
@@ -111,4 +102,3 @@ pub fn wrap(canvas: &Canvas, text: &str, font: PdfFontToken, size: f32, max_mm: 
     }
     lines
 }
-

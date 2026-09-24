@@ -46,8 +46,16 @@ pub fn normalize_origin(origin: &str) -> Result<String, String> {
     if o == ANY_ORIGIN {
         return Ok(o);
     }
-	let bad = || format!("Origin '{}' is invalid: use a format such as https://app.example.com or http://192.168.1.20:8080", origin.trim());
-    let rest = o.strip_prefix("https://").or_else(|| o.strip_prefix("http://")).ok_or_else(bad)?;
+    let bad = || {
+        format!(
+            "Origin '{}' is invalid: use a format such as https://app.example.com or http://192.168.1.20:8080",
+            origin.trim()
+        )
+    };
+    let rest = o
+        .strip_prefix("https://")
+        .or_else(|| o.strip_prefix("http://"))
+        .ok_or_else(bad)?;
     let valid = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']');
     if rest.is_empty() || !rest.chars().all(valid) || rest.starts_with(['.', '-', ':']) {
         return Err(bad());
@@ -70,7 +78,7 @@ impl Preset {
     pub fn validate(&self) -> Result<(), String> {
         self.settings.validate()?;
         if let Some(d) = &self.design {
-			d.validate().map_err(|e| format!("design: {}", e))?;
+            d.validate().map_err(|e| format!("design: {}", e))?;
         }
         Ok(())
     }
@@ -86,7 +94,10 @@ impl Serialize for Preset {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let mut v = serde_json::to_value(&self.settings).map_err(serde::ser::Error::custom)?;
         if let (Some(obj), Some(design)) = (v.as_object_mut(), &self.design) {
-            obj.insert("design".into(), serde_json::to_value(design).map_err(serde::ser::Error::custom)?);
+            obj.insert(
+                "design".into(),
+                serde_json::to_value(design).map_err(serde::ser::Error::custom)?,
+            );
         }
         v.serialize(s)
     }
@@ -98,7 +109,7 @@ impl<'de> Deserialize<'de> for Preset {
         let mut obj = serde_json::Map::<String, serde_json::Value>::deserialize(d)?;
         let design = match obj.remove("design") {
             None | Some(serde_json::Value::Null) => None,
-			Some(v) => Some(serde_json::from_value(v).map_err(|e| D::Error::custom(format!("design: {}", e)))?),
+            Some(v) => Some(serde_json::from_value(v).map_err(|e| D::Error::custom(format!("design: {}", e)))?),
         };
         let settings = serde_json::from_value(serde_json::Value::Object(obj)).map_err(D::Error::custom)?;
         Ok(Preset { settings, design })
@@ -172,23 +183,23 @@ impl Config {
         }
         for (name, preset) in &self.presets {
             validate_preset_name(name)?;
-			preset.validate().map_err(|e| format!("Preset '{}': {}", name, e))?;
+            preset.validate().map_err(|e| format!("Preset '{}': {}", name, e))?;
         }
         if let Some(p) = &self.default_preset {
             if !self.presets.contains_key(p) {
-				return Err(format!("Default preset '{}' does not exist", p));
+                return Err(format!("Default preset '{}' does not exist", p));
             }
         }
         if self.allowed_origins.len() > MAX_ORIGINS {
-			return Err(format!("At most {} origins are allowed", MAX_ORIGINS));
+            return Err(format!("At most {} origins are allowed", MAX_ORIGINS));
         }
         for o in &self.allowed_origins {
             if normalize_origin(o)? != *o {
-				return Err(format!("Origin '{}' is not in canonical form", o));
+                return Err(format!("Origin '{}' is not in canonical form", o));
             }
         }
         if !(1..=3650).contains(&self.history_retention_days) {
-			return Err("History retention must be 1–3650 days".into());
+            return Err("History retention must be 1–3650 days".into());
         }
         Ok(())
     }
@@ -196,13 +207,13 @@ impl Config {
 
 pub fn validate_preset_name(name: &str) -> Result<(), String> {
     if name.trim().is_empty() {
-		return Err("Preset name cannot be empty".into());
+        return Err("Preset name cannot be empty".into());
     }
     if name.trim() != name {
-		return Err(format!("Preset name '{}' starts or ends with whitespace", name));
+        return Err(format!("Preset name '{}' starts or ends with whitespace", name));
     }
     if name.chars().count() > MAX_PRESET_NAME {
-		return Err(format!("Preset name must be at most {} characters", MAX_PRESET_NAME));
+        return Err(format!("Preset name must be at most {} characters", MAX_PRESET_NAME));
     }
     Ok(())
 }
@@ -229,13 +240,25 @@ impl Config {
                 .unwrap_or_default();
             let target = if self.presets.contains_key(&name) {
                 (1..)
-					.map(|i| if i == 1 { format!("{} (design)", name) } else { format!("{} (design {})", name, i) })
+                    .map(|i| {
+                        if i == 1 {
+                            format!("{} (design)", name)
+                        } else {
+                            format!("{} (design {})", name, i)
+                        }
+                    })
                     .find(|n| !self.presets.contains_key(n))
                     .unwrap()
             } else {
                 name
             };
-            self.presets.insert(target, Preset { settings, design: Some(legacy.design) });
+            self.presets.insert(
+                target,
+                Preset {
+                    settings,
+                    design: Some(legacy.design),
+                },
+            );
         }
         true
     }
@@ -251,11 +274,9 @@ impl ConfigStore {
             Ok(Some(cfg)) => cfg,
             Ok(None) => Config::default(),
             Err(e) => {
-				eprintln!("config.json is corrupted ({}), trying the backup", e);
-                let aside = path.with_extension(format!(
-                    "json.corrupt-{}",
-                    chrono::Local::now().format("%Y%m%d%H%M%S")
-                ));
+                eprintln!("config.json is corrupted ({}), trying the backup", e);
+                let aside =
+                    path.with_extension(format!("json.corrupt-{}", chrono::Local::now().format("%Y%m%d%H%M%S")));
                 let _ = fs::rename(&path, aside);
                 read_config(&backup).ok().flatten().unwrap_or_default()
             }
@@ -263,11 +284,14 @@ impl ConfigStore {
         if config.migrate() {
             config.version = CONFIG_VERSION;
             match write_atomic(&path, &config) {
-				Ok(()) => eprintln!("[ix.print] old template moved to preset (design)"),
-				Err(e) => eprintln!("[ix.print] template migration was not saved: {}", e),
+                Ok(()) => eprintln!("[ix.print] old template moved to preset (design)"),
+                Err(e) => eprintln!("[ix.print] template migration was not saved: {}", e),
             }
         }
-        ConfigStore { path, data: RwLock::new(config) }
+        ConfigStore {
+            path,
+            data: RwLock::new(config),
+        }
     }
 
     pub fn get(&self) -> Config {
@@ -296,7 +320,7 @@ fn read_config(path: &Path) -> Result<Option<Config>, String> {
             let cfg: Config = serde_json::from_str(&text).map_err(|e| e.to_string())?;
             if cfg.version > CONFIG_VERSION {
                 return Err(format!(
-					"Created by a newer version of ix.print (version {})",
+                    "Created by a newer version of ix.print (version {})",
                     cfg.version
                 ));
             }
@@ -309,10 +333,10 @@ fn read_config(path: &Path) -> Result<Option<Config>, String> {
 
 fn write_atomic(path: &Path, config: &Config) -> Result<(), String> {
     let dir = path.parent().ok_or("invalid config path")?;
-	fs::create_dir_all(dir).map_err(|e| format!("Failed to create the config folder: {}", e))?;
+    fs::create_dir_all(dir).map_err(|e| format!("Failed to create the config folder: {}", e))?;
     let json = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
     let tmp = path.with_extension("json.tmp");
-	fs::write(&tmp, json).map_err(|e| format!("Failed to save config: {}", e))?;
+    fs::write(&tmp, json).map_err(|e| format!("Failed to save config: {}", e))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -321,7 +345,7 @@ fn write_atomic(path: &Path, config: &Config) -> Result<(), String> {
     if path.exists() {
         let _ = fs::copy(path, path.with_extension("json.bak"));
     }
-	fs::rename(&tmp, path).map_err(|e| format!("Failed to save config: {}", e))
+    fs::rename(&tmp, path).map_err(|e| format!("Failed to save config: {}", e))
 }
 
 // ---------------------------------------------------------------------------
@@ -364,20 +388,19 @@ impl PresetBundle {
     }
 
     pub fn parse(text: &str) -> Result<PresetBundle, String> {
-        let bundle: PresetBundle =
-			serde_json::from_str(text).map_err(|e| format!("Preset file is invalid: {}", e))?;
+        let bundle: PresetBundle = serde_json::from_str(text).map_err(|e| format!("Preset file is invalid: {}", e))?;
         if bundle.format != BUNDLE_FORMAT {
-			return Err(format!("Not an ix.print preset file (format '{}')", bundle.format));
+            return Err(format!("Not an ix.print preset file (format '{}')", bundle.format));
         }
         if bundle.version > CONFIG_VERSION {
             return Err(format!(
-				"File was created by a newer version of ix.print (version {})",
+                "File was created by a newer version of ix.print (version {})",
                 bundle.version
             ));
         }
         for (name, preset) in &bundle.presets {
             validate_preset_name(name)?;
-			preset.validate().map_err(|e| format!("Preset '{}': {}", name, e))?;
+            preset.validate().map_err(|e| format!("Preset '{}': {}", name, e))?;
         }
         Ok(bundle)
     }
@@ -469,9 +492,11 @@ pub fn apply_import(
     for (name, settings) in &bundle.presets {
         let decision = options.decisions.iter().find(|d| &d.name == name);
         let exists = config.presets.contains_key(name);
-        let action = decision
-            .map(|d| d.action)
-            .unwrap_or(if exists { ImportAction::Skip } else { ImportAction::Overwrite });
+        let action = decision.map(|d| d.action).unwrap_or(if exists {
+            ImportAction::Skip
+        } else {
+            ImportAction::Overwrite
+        });
 
         let target = match action {
             ImportAction::Skip => continue,
@@ -480,7 +505,7 @@ pub fn apply_import(
                 Some(n) => {
                     validate_preset_name(&n)?;
                     if config.presets.contains_key(&n) {
-						return Err(format!("Preset '{}' already exists", n));
+                        return Err(format!("Preset '{}' already exists", n));
                     }
                     n
                 }
@@ -535,10 +560,23 @@ mod tests {
 
     #[test]
     fn origins_and_secure_defaults() {
-        assert_eq!(normalize_origin(" https://SIMRS.Contoh.id/ ").unwrap(), "https://simrs.contoh.id");
-        assert_eq!(normalize_origin("http://192.168.1.20:8080").unwrap(), "http://192.168.1.20:8080");
+        assert_eq!(
+            normalize_origin(" https://SIMRS.Contoh.id/ ").unwrap(),
+            "https://simrs.contoh.id"
+        );
+        assert_eq!(
+            normalize_origin("http://192.168.1.20:8080").unwrap(),
+            "http://192.168.1.20:8080"
+        );
         assert_eq!(normalize_origin("*").unwrap(), "*");
-        for bad in ["simrs.id", "https://", "https://a.id/path", "ftp://a.id", "https://a b", "https://u@a.id"] {
+        for bad in [
+            "simrs.id",
+            "https://",
+            "https://a.id/path",
+            "ftp://a.id",
+            "https://a b",
+            "https://u@a.id",
+        ] {
             assert!(normalize_origin(bad).is_err(), "{}", bad);
         }
         // New config: token required, no website allowed.
@@ -587,7 +625,10 @@ mod tests {
         let imported = apply_import(&mut dst, &bundle, &options).unwrap();
         assert_eq!(imported, vec!["laporan".to_string(), "struk (2)".to_string()]);
         assert_eq!(dst.presets["struk"].settings.printer.as_deref(), Some("OLD"));
-        assert_eq!(dst.presets["struk (2)"].settings.printer.as_deref(), Some("LOCAL-EPSON"));
+        assert_eq!(
+            dst.presets["struk (2)"].settings.printer.as_deref(),
+            Some("LOCAL-EPSON")
+        );
         assert_eq!(dst.default_preset.as_deref(), Some("struk (2)"));
         assert_eq!(dst.default_printer.as_deref(), Some("HP"));
         dst.validate().unwrap();
@@ -600,10 +641,8 @@ mod tests {
         assert!(p.design.is_none());
         assert_eq!(serde_json::to_string(&p).unwrap(), r#"{"copies":2,"paper":"A4"}"#);
         assert!(serde_json::from_str::<Preset>(r#"{"papr":"A4"}"#).is_err());
-        let with: Preset = serde_json::from_str(
-            r#"{"printer":"Z","design":{"width_mm":60,"height_mm":40,"elements":[]}}"#,
-        )
-        .unwrap();
+        let with: Preset =
+            serde_json::from_str(r#"{"printer":"Z","design":{"width_mm":60,"height_mm":40,"elements":[]}}"#).unwrap();
         assert_eq!(with.design.as_ref().unwrap().width_mm, 60.0);
         assert!(serde_json::to_string(&with).unwrap().contains("\"design\""));
 
@@ -618,7 +657,7 @@ mod tests {
         .unwrap();
         assert!(cfg.migrate());
         assert!(cfg.templates.is_empty());
-		let label = &cfg.presets["label (design)"];
+        let label = &cfg.presets["label (design)"];
         assert_eq!(label.settings.printer.as_deref(), Some("Zebra"));
         assert_eq!(label.settings.offset_x, Some(1.5));
         assert_eq!(label.design.as_ref().unwrap().sample["nama"], "A");
@@ -632,10 +671,9 @@ mod tests {
     #[test]
     fn rejects_foreign_files() {
         assert!(PresetBundle::parse(r#"{"format":"other","version":1,"presets":{}}"#).is_err());
-        assert!(PresetBundle::parse(
-            r#"{"format":"ixprint-presets","version":1,"presets":{"a":{"paper":"A99"}}}"#
-        )
-        .is_err());
+        assert!(
+            PresetBundle::parse(r#"{"format":"ixprint-presets","version":1,"presets":{"a":{"paper":"A99"}}}"#).is_err()
+        );
     }
 
     #[test]
@@ -654,7 +692,12 @@ mod tests {
                 Ok(())
             })
             .unwrap();
-        assert!(store.update(|c| { c.default_preset = Some("nope".into()); Ok(()) }).is_err());
+        assert!(store
+            .update(|c| {
+                c.default_preset = Some("nope".into());
+                Ok(())
+            })
+            .is_err());
         assert_eq!(ConfigStore::load(&dir).get().default_preset.as_deref(), Some("a"));
         assert!(dir.join("config.json.bak").exists());
         fs::write(dir.join("config.json"), "{broken").unwrap();

@@ -20,17 +20,28 @@ fn ps(script: &str, env: &[(&str, String)]) -> Result<String, String> {
     let utf16: Vec<u8> = full.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
     let encoded = base64::engine::general_purpose::STANDARD.encode(utf16);
     let mut cmd = Command::new("powershell.exe");
-    cmd.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", &encoded])
-        .creation_flags(CREATE_NO_WINDOW);
+    cmd.args([
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-EncodedCommand",
+        &encoded,
+    ])
+    .creation_flags(CREATE_NO_WINDOW);
     for (k, v) in env {
         cmd.env(format!("FXP_{}", k), v);
     }
-	let out = cmd.output().map_err(|e| format!("Failed to run PowerShell: {}", e))?;
+    let out = cmd.output().map_err(|e| format!("Failed to run PowerShell: {}", e))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
         let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-		Err(if err.is_empty() { "PowerShell failed".into() } else { err })
+        Err(if err.is_empty() {
+            "PowerShell failed".into()
+        } else {
+            err
+        })
     }
 }
 
@@ -47,7 +58,10 @@ fn json_list(text: &str) -> Result<Vec<serde_json::Value>, String> {
 }
 
 fn str_of(v: &serde_json::Value, key: &str) -> Option<String> {
-    v.get(key).and_then(|x| x.as_str()).map(str::to_string).filter(|s| !s.is_empty())
+    v.get(key)
+        .and_then(|x| x.as_str())
+        .map(str::to_string)
+        .filter(|s| !s.is_empty())
 }
 
 pub fn devices() -> Result<Vec<Device>, String> {
@@ -60,13 +74,23 @@ pub fn devices() -> Result<Vec<Device>, String> {
         .filter_map(|p| {
             let name = str_of(p, "Name")?;
             let host = str_of(p, "PrinterHostAddress");
-            let kind = if name.to_uppercase().starts_with("USB") { "usb" } else if host.is_some() { "network" } else { "port" };
+            let kind = if name.to_uppercase().starts_with("USB") {
+                "usb"
+            } else if host.is_some() {
+                "network"
+            } else {
+                "port"
+            };
             let info = match (&host, str_of(p, "Description")) {
                 (Some(h), _) => format!("{} ({})", name, h),
                 (None, Some(d)) => format!("{} — {}", name, d),
                 _ => name.clone(),
             };
-            Some(Device { uri: name, kind: kind.into(), info })
+            Some(Device {
+                uri: name,
+                kind: kind.into(),
+                info,
+            })
         })
         .collect())
 }
@@ -85,7 +109,10 @@ pub fn details(name: &str) -> Result<PrinterDetails, String> {
         "Get-Printer -Name $env:FXP_NAME | Select-Object Name, DriverName, PortName, Comment, Location, Shared | ConvertTo-Json -Compress",
         &[("NAME", name.to_string())],
     )?;
-	let p = json_list(&out)?.into_iter().next().ok_or_else(|| format!("Printer '{}' was not found", name))?;
+    let p = json_list(&out)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| format!("Printer '{}' was not found", name))?;
     Ok(PrinterDetails {
         name: name.to_string(),
         description: str_of(&p, "Comment"),
@@ -129,7 +156,7 @@ pub(crate) fn add_env(p: &NewPrinter) -> Result<Vec<(&'static str, String)>, Str
         p.driver
             .clone()
             .filter(|d| !d.trim().is_empty())
-			.ok_or_else(|| "Windows needs a driver: choose an installed driver (or use IPP)".to_string())
+            .ok_or_else(|| "Windows needs a driver: choose an installed driver (or use IPP)".to_string())
     };
     let mut env = vec![
         ("NAME", p.name.clone()),
@@ -138,13 +165,23 @@ pub(crate) fn add_env(p: &NewPrinter) -> Result<Vec<(&'static str, String)>, Str
         ("SHARED", p.shared.to_string()),
     ];
     match &p.connection {
-        Connection::Network { host, protocol: NetProtocol::Ipp, port, queue } if p.driver.is_none() => {
+        Connection::Network {
+            host,
+            protocol: NetProtocol::Ipp,
+            port,
+            queue,
+        } if p.driver.is_none() => {
             env.push(("MODE", "ipp".into()));
             let url = super::manage::network_uri(host, NetProtocol::Ipp, *port, queue.as_deref())
                 .replacen("ipp://", "http://", 1);
             env.push(("URL", url));
         }
-        Connection::Network { host, protocol, port, queue } => {
+        Connection::Network {
+            host,
+            protocol,
+            port,
+            queue,
+        } => {
             let (mode, tcp) = match protocol {
                 NetProtocol::Lpd => ("lpd", 515),
                 // IPP with a chosen driver goes over raw TCP to the same host.
@@ -154,7 +191,18 @@ pub(crate) fn add_env(p: &NewPrinter) -> Result<Vec<(&'static str, String)>, Str
             env.push(("HOST", host.clone()));
             env.push(("TCP", tcp.to_string()));
             env.push(("QUEUE", queue.clone().unwrap_or_else(|| "queue".into())));
-            env.push(("PORT", format!("ixPrint_{}_{}", host, if mode == "lpd" { "lpd".to_string() } else { tcp.to_string() })));
+            env.push((
+                "PORT",
+                format!(
+                    "ixPrint_{}_{}",
+                    host,
+                    if mode == "lpd" {
+                        "lpd".to_string()
+                    } else {
+                        tcp.to_string()
+                    }
+                ),
+            ));
             env.push(("DRIVER", driver()?));
         }
         Connection::Device { uri } => {

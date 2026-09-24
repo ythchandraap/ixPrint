@@ -33,10 +33,7 @@ pub struct AppState {
 impl AppState {
     /// The printer used when neither the request nor the preset names one.
     pub fn default_printer(&self) -> Option<String> {
-        self.config
-            .get()
-            .default_printer
-            .or_else(printer::os_default_printer)
+        self.config.get().default_printer.or_else(printer::os_default_printer)
     }
 }
 
@@ -62,7 +59,10 @@ pub enum Document {
     /// Edge-to-edge calibration pages generated at the sheet size of the job.
     TestPage { pages: u32 },
     /// The preset's design filled with the records; `header` values are shared by all pages.
-    Data { records: Vec<crate::template::Record>, header: crate::template::Record },
+    Data {
+        records: Vec<crate::template::Record>,
+        header: crate::template::Record,
+    },
 }
 
 pub struct JobRequest {
@@ -120,7 +120,7 @@ pub fn run(state: &AppState, req: JobRequest) -> Result<JobResult, JobError> {
                 .presets
                 .get(name)
                 .cloned()
-				.ok_or_else(|| JobError::BadRequest(format!("Preset '{}' was not found", name)))?,
+                .ok_or_else(|| JobError::BadRequest(format!("Preset '{}' was not found", name)))?,
             None => Default::default(),
         };
         let merged = preset.settings.overlay(&req.settings);
@@ -131,7 +131,7 @@ pub fn run(state: &AppState, req: JobRequest) -> Result<JobResult, JobError> {
             .clone()
             .or_else(|| state.default_printer())
             .ok_or_else(|| {
-				JobError::BadRequest("No printer: choose one in the request, preset or default printer".into())
+                JobError::BadRequest("No printer: choose one in the request, preset or default printer".into())
             })?;
         record.printer = printer_name.clone();
         let local_names: Vec<String> = printer::list_printers().into_iter().map(|p| p.name).collect();
@@ -139,13 +139,15 @@ pub fn run(state: &AppState, req: JobRequest) -> Result<JobResult, JobError> {
             crate::remote::Target::Local(_) => {}
             crate::remote::Target::Unknown => {
                 return Err(JobError::BadRequest(format!(
-				"Printer '{}' was not found on this computer",
+                    "Printer '{}' was not found on this computer",
                     printer_name
                 )));
             }
             crate::remote::Target::Remote { remote, printer } => {
                 if req.hop {
-                    return Err(JobError::BadRequest("Forwarding between ix.print computers is limited to one hop".into()));
+                    return Err(JobError::BadRequest(
+                        "Forwarding between ix.print computers is limited to one hop".into(),
+                    ));
                 }
                 return crate::remote::forward(
                     state,
@@ -175,13 +177,13 @@ pub fn run(state: &AppState, req: JobRequest) -> Result<JobResult, JobError> {
             Document::Data { records, header } => {
                 let template = preset.design.as_ref().ok_or_else(|| {
                     JobError::BadRequest(match &preset_name {
-						Some(name) => format!("Preset '{}' has no design; send a PDF instead of JSON data", name),
-						None => "Specify a preset with a design in the \"preset\" field".into(),
+                        Some(name) => format!("Preset '{}' has no design; send a PDF instead of JSON data", name),
+                        None => "Specify a preset with a design in the \"preset\" field".into(),
                     })
                 })?;
                 if records.len() > crate::template::MAX_RECORDS {
                     return Err(JobError::BadRequest(format!(
-						"at most {} records per job",
+                        "at most {} records per job",
                         crate::template::MAX_RECORDS
                     )));
                 }
@@ -250,7 +252,7 @@ pub fn run(state: &AppState, req: JobRequest) -> Result<JobResult, JobError> {
     record.error = result.as_ref().err().map(|e| e.message().to_string());
     record.duration_ms = started.elapsed().as_millis() as u64;
     if let Err(e) = state.history.append(&record) {
-		eprintln!("Failed to write history: {}", e);
+        eprintln!("Failed to write history: {}", e);
     }
     if let Err(e) = &result {
         let _ = state.diagnostics.record("error", req.source, e.message(), None);
@@ -262,7 +264,10 @@ pub fn run(state: &AppState, req: JobRequest) -> Result<JobResult, JobError> {
 pub(crate) fn design_paper(t: &crate::template::Template) -> Paper {
     match t.layout {
         crate::template::Layout::List { roll: true, .. } => Paper::Roll { width_mm: t.width_mm },
-        _ => Paper::Custom { width_mm: t.width_mm, height_mm: t.height_mm },
+        _ => Paper::Custom {
+            width_mm: t.width_mm,
+            height_mm: t.height_mm,
+        },
     }
 }
 
@@ -282,7 +287,7 @@ fn check_paper_fits(job: &JobSettings) -> Result<(), String> {
     if too_wide || too_long {
         let max = |v: Option<f32>| v.map(|m| format!("{:.0}", m)).unwrap_or_else(|| "?".into());
         return Err(format!(
-			"Paper size {} is larger than printer '{}' maximum ({} × {} mm). Check the units (mm).",
+            "Paper size {} is larger than printer '{}' maximum ({} × {} mm). Check the units (mm).",
             job.paper,
             job.printer,
             max(caps.max_width_mm),
@@ -311,15 +316,15 @@ fn test_sheet_mm(job: &JobSettings, default_paper: (f32, f32)) -> (f32, f32) {
 
 fn test_page_info(job: &JobSettings, preset: Option<&str>, w: f32, h: f32) -> Vec<String> {
     let paper = match &job.paper {
-		Paper::Roll { .. } => format!("{:.0} mm roll (example length {:.0} mm)", w, h),
+        Paper::Roll { .. } => format!("{:.0} mm roll (example length {:.0} mm)", w, h),
         Paper::PrinterDefault => format!("{:.0} × {:.0} mm (default printer)", w, h),
         p => format!("{} = {:.0} × {:.0} mm", p, w, h),
     };
     vec![
-		format!("Paper: {}", paper),
+        format!("Paper: {}", paper),
         format!("Printer: {}", job.printer),
         format!("Preset: {}", preset.unwrap_or("—")),
-		format!("Offset X: {} mm · Offset Y: {} mm", job.offset_x, job.offset_y),
+        format!("Offset X: {} mm · Offset Y: {} mm", job.offset_x, job.offset_y),
         chrono::Local::now().format("%d-%m-%Y %H:%M:%S").to_string(),
     ]
 }
@@ -360,7 +365,10 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ixprint-tp-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let cases = [
-            (r#"{"paper":"A4","orientation":"landscape","margins":"10","scale":"fit"}"#, (297.0, 210.0)),
+            (
+                r#"{"paper":"A4","orientation":"landscape","margins":"10","scale":"fit"}"#,
+                (297.0, 210.0),
+            ),
             (r#"{"paper":"80mm"}"#, (80.0, 80.0)),
             (r#"{"paper":"100x150mm","orientation":"auto"}"#, (100.0, 150.0)),
         ];
@@ -384,7 +392,9 @@ mod tests {
             let doc = pdfium.load_pdf_from_file(&out, None).unwrap();
             let page = doc.pages().get(0).unwrap();
             let (pw, ph) = ((sheet.width_pt * 4.0) as i32, (sheet.height_pt * 4.0) as i32);
-            let bmp = page.render_with_config(&PdfRenderConfig::new().set_fixed_size(pw, ph)).unwrap();
+            let bmp = page
+                .render_with_config(&PdfRenderConfig::new().set_fixed_size(pw, ph))
+                .unwrap();
             let px = bmp.as_rgba_bytes();
             let dark = |x: i32, y: i32| px[((y * pw + x) * 4) as usize] < 80;
             for (x, y) in [(1, ph / 3), (pw - 2, ph / 3), (pw / 3, 1), (pw / 3, ph - 2)] {
@@ -409,8 +419,15 @@ mod live_probe {
         let caps = printer::capabilities(&printer).unwrap();
         println!("max: {:?} x {:?} mm", caps.max_width_mm, caps.max_height_mm);
         for paper in ["600x750mm", "60x75mm", "80mm", "300mm"] {
-            let s = PrintSettings { paper: Some(paper.parse().unwrap()), ..Default::default() };
-            println!("{}: {:?}", paper, check_paper_fits(&JobSettings::resolve(&s, printer.clone())));
+            let s = PrintSettings {
+                paper: Some(paper.parse().unwrap()),
+                ..Default::default()
+            };
+            println!(
+                "{}: {:?}",
+                paper,
+                check_paper_fits(&JobSettings::resolve(&s, printer.clone()))
+            );
         }
     }
 }

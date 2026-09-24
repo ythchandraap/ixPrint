@@ -13,7 +13,7 @@ fn run(program: &str, args: &[&str]) -> Result<String, String> {
         .args(args)
         .env("LC_ALL", "C")
         .output()
-		.map_err(|e| format!("Failed to run {}: {}", program, e))?;
+        .map_err(|e| format!("Failed to run {}: {}", program, e))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
@@ -25,19 +25,19 @@ fn run(program: &str, args: &[&str]) -> Result<String, String> {
 fn alert_message(alerts: &str) -> Option<(&'static str, bool)> {
     // (message, is_error)
     const KNOWN: &[(&str, &str, bool)] = &[
-		("media-empty", "Out of paper", true),
-		("media-needed", "Out of paper", true),
-		("media-jam", "Paper jam", true),
-		("toner-empty", "Ink/toner empty", true),
-		("marker-supply-empty", "Ink/toner empty", true),
-		("door-open", "Printer door is open", true),
-		("cover-open", "Printer cover is open", true),
-		("offline", "Printer offline / not responding", true),
-		("other-error", "Printer error", true),
-		("paused", "Printer paused", true),
-		("toner-low", "Ink/toner is low", false),
-		("marker-supply-low", "Ink/toner is low", false),
-		("connecting-to-device", "Connecting to printer…", false),
+        ("media-empty", "Out of paper", true),
+        ("media-needed", "Out of paper", true),
+        ("media-jam", "Paper jam", true),
+        ("toner-empty", "Ink/toner empty", true),
+        ("marker-supply-empty", "Ink/toner empty", true),
+        ("door-open", "Printer door is open", true),
+        ("cover-open", "Printer cover is open", true),
+        ("offline", "Printer offline / not responding", true),
+        ("other-error", "Printer error", true),
+        ("paused", "Printer paused", true),
+        ("toner-low", "Ink/toner is low", false),
+        ("marker-supply-low", "Ink/toner is low", false),
+        ("connecting-to-device", "Connecting to printer…", false),
     ];
     KNOWN
         .iter()
@@ -59,7 +59,9 @@ fn parse_printer_states(text: &str) -> Vec<PrinterState> {
     let mut in_header = false; // lines between the "printer" line and "Form mounted:"
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("printer ") {
-            let Some((name, state)) = rest.split_once(' ') else { continue };
+            let Some((name, state)) = rest.split_once(' ') else {
+                continue;
+            };
             let printing = state
                 .strip_prefix("now printing ")
                 .and_then(|r| r.split(|c: char| c == ' ' || c == '.').next())
@@ -72,7 +74,12 @@ fn parse_printer_states(text: &str) -> Vec<PrinterState> {
             } else {
                 "Normal"
             };
-            out.push(PrinterState { name: name.to_string(), status: status.into(), message: None, printing });
+            out.push(PrinterState {
+                name: name.to_string(),
+                status: status.into(),
+                message: None,
+                printing,
+            });
             in_header = true;
             continue;
         }
@@ -121,12 +128,18 @@ fn parse_jobs(text: &str, printing: Option<&str>) -> Vec<QueueJob> {
     let mut jobs: Vec<QueueJob> = Vec::new();
     for line in text.lines() {
         if !line.starts_with(char::is_whitespace) {
-            let Some(id) = line.split_whitespace().next() else { continue };
+            let Some(id) = line.split_whitespace().next() else {
+                continue;
+            };
             jobs.push(QueueJob {
                 id: id.to_string(),
                 document: String::new(),
                 position: jobs.len() as u32 + 1,
-                state: if Some(id) == printing { JobState::Printing } else { JobState::Queued },
+                state: if Some(id) == printing {
+                    JobState::Printing
+                } else {
+                    JobState::Queued
+                },
                 message: None,
                 pages: None,
                 pages_printed: None,
@@ -169,13 +182,16 @@ fn job_documents(printer: &str) -> Vec<(String, String)> {
 }
 
 pub fn queue(printer: &str) -> Result<PrinterQueue, String> {
-    let states = run("lpstat", &["-l", "-p", printer])
-		.map_err(|e| format!("Printer '{}' was not found: {}", printer, e))?;
+    let states =
+        run("lpstat", &["-l", "-p", printer]).map_err(|e| format!("Printer '{}' was not found: {}", printer, e))?;
     let state = parse_printer_states(&states)
         .into_iter()
         .next()
-		.ok_or_else(|| format!("Printer '{}' was not found", printer))?;
-    let mut jobs = parse_jobs(&run("lpstat", &["-l", "-o", printer]).unwrap_or_default(), state.printing.as_deref());
+        .ok_or_else(|| format!("Printer '{}' was not found", printer))?;
+    let mut jobs = parse_jobs(
+        &run("lpstat", &["-l", "-o", printer]).unwrap_or_default(),
+        state.printing.as_deref(),
+    );
     let docs = job_documents(printer);
     for job in &mut jobs {
         let number = job.id.rsplit('-').next().unwrap_or_default();
@@ -183,7 +199,12 @@ pub fn queue(printer: &str) -> Result<PrinterQueue, String> {
             job.document = doc.clone();
         }
     }
-    Ok(PrinterQueue { printer: printer.to_string(), status: state.status, message: state.message, jobs })
+    Ok(PrinterQueue {
+        printer: printer.to_string(),
+        status: state.status,
+        message: state.message,
+        jobs,
+    })
 }
 
 pub fn was_completed(printer: &str, spooler_job: &str) -> bool {
@@ -209,8 +230,8 @@ struct PpdOption {
 }
 
 fn ppd_options(printer: &str) -> Result<Vec<PpdOption>, String> {
-    let text = run("lpoptions", &["-p", printer, "-l"])
-		.map_err(|e| format!("Printer '{}' was not found: {}", printer, e))?;
+    let text =
+        run("lpoptions", &["-p", printer, "-l"]).map_err(|e| format!("Printer '{}' was not found: {}", printer, e))?;
     Ok(text
         .lines()
         .filter_map(|line| {
@@ -254,8 +275,11 @@ pub fn capabilities(printer: &str) -> Result<Capabilities, String> {
         Some(o) => (o.values.clone(), o.default.clone()),
         None => (vec![], None),
     };
-    let duplex = find(&["Duplex", "sides", "EFDuplex", "KMDuplex"])
-        .is_some_and(|o| o.values.iter().any(|v| !matches!(v.as_str(), "None" | "False" | "one-sided")));
+    let duplex = find(&["Duplex", "sides", "EFDuplex", "KMDuplex"]).is_some_and(|o| {
+        o.values
+            .iter()
+            .any(|v| !matches!(v.as_str(), "None" | "False" | "one-sided"))
+    });
     let color = find(&["ColorModel", "print-color-mode", "ColorMode"]).map_or(false, |o| {
         o.values.iter().any(|v| {
             let v = v.to_ascii_lowercase();
@@ -264,7 +288,16 @@ pub fn capabilities(printer: &str) -> Result<Capabilities, String> {
     });
 
     let (max_width_mm, max_height_mm) = ppd_max_media(printer);
-    Ok(Capabilities { papers, default_paper, trays, default_tray, duplex, color, max_width_mm, max_height_mm })
+    Ok(Capabilities {
+        papers,
+        default_paper,
+        trays,
+        default_tray,
+        duplex,
+        color,
+        max_width_mm,
+        max_height_mm,
+    })
 }
 
 /// `*MaxMediaWidth` / `*MaxMediaHeight` (points) from the printer's PPD, if readable.
@@ -275,7 +308,14 @@ fn ppd_max_media(printer: &str) -> (Option<f32>, Option<f32>) {
     let value = |key: &str| {
         ppd.lines()
             .find_map(|l| l.strip_prefix(key))
-            .and_then(|v| v.trim().trim_start_matches(':').trim().trim_matches('"').parse::<f32>().ok())
+            .and_then(|v| {
+                v.trim()
+                    .trim_start_matches(':')
+                    .trim()
+                    .trim_matches('"')
+                    .parse::<f32>()
+                    .ok()
+            })
             .map(pt_to_mm)
     };
     (value("*MaxMediaWidth"), value("*MaxMediaHeight"))
@@ -317,12 +357,7 @@ fn media_option(printer: &str, paper: &Paper, sheets: &[Sheet]) -> Option<String
     Some(format!("Custom.{:.1}x{:.1}mm", w, h))
 }
 
-pub fn print(
-    printer: &str,
-    pdf: &Path,
-    sheets: &[Sheet],
-    o: &DeviceOptions,
-) -> Result<Option<String>, String> {
+pub fn print(printer: &str, pdf: &Path, sheets: &[Sheet], o: &DeviceOptions) -> Result<Option<String>, String> {
     let mut args: Vec<String> = vec![
         "-d".into(),
         printer.into(),
@@ -378,10 +413,19 @@ mod tests {
         let text = "printer EPSON is idle.  enabled since Wed Mar 19 10:52:28 2025\n\tForm mounted:\n\tAlerts: offline-report\n\tDescription: EPSON\nprinter HP now printing HP-12.  enabled since Mon\n\tRendering page 2\n\tForm mounted:\n\tAlerts: none\nprinter Z disabled since Mon -\n\tPaused by admin\n\tForm mounted:\n\tAlerts: media-empty-error\n";
         let s = parse_printer_states(text);
         assert_eq!(s.len(), 3);
-		assert_eq!((s[0].status.as_str(), s[0].message.as_deref()), ("Offline", Some("Printer offline / not responding")));
-        assert_eq!((s[1].status.as_str(), s[1].printing.as_deref()), ("Printing", Some("HP-12")));
+        assert_eq!(
+            (s[0].status.as_str(), s[0].message.as_deref()),
+            ("Offline", Some("Printer offline / not responding"))
+        );
+        assert_eq!(
+            (s[1].status.as_str(), s[1].printing.as_deref()),
+            ("Printing", Some("HP-12"))
+        );
         assert_eq!(s[1].message.as_deref(), Some("Rendering page 2"));
-        assert_eq!((s[2].status.as_str(), s[2].message.as_deref()), ("Offline", Some("Paused by admin")));
+        assert_eq!(
+            (s[2].status.as_str(), s[2].message.as_deref()),
+            ("Offline", Some("Paused by admin"))
+        );
     }
 
     #[test]

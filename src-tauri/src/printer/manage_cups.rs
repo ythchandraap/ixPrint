@@ -10,12 +10,16 @@ fn run(program: &str, args: &[String]) -> Result<String, String> {
         .args(args)
         .env("LC_ALL", "C")
         .output()
-		.map_err(|e| format!("Failed to run {}: {}", program, e))?;
+        .map_err(|e| format!("Failed to run {}: {}", program, e))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
         let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-		Err(if err.is_empty() { format!("{} failed", program) } else { err })
+        Err(if err.is_empty() {
+            format!("{} failed", program)
+        } else {
+            err
+        })
     }
 }
 
@@ -36,7 +40,11 @@ fn parse_devices(text: &str) -> Vec<Device> {
                 } else {
                     "network"
                 };
-                out.push(Device { info: if info.is_empty() { uri.clone() } else { info }, uri, kind: kind.into() });
+                out.push(Device {
+                    info: if info.is_empty() { uri.clone() } else { info },
+                    uri,
+                    kind: kind.into(),
+                });
             }
         }
     };
@@ -66,7 +74,10 @@ fn parse_drivers(text: &str) -> Vec<Driver> {
     text.lines()
         .filter_map(|l| {
             let (id, name) = l.trim().split_once(' ')?;
-            Some(Driver { id: id.to_string(), name: name.trim().to_string() })
+            Some(Driver {
+                id: id.to_string(),
+                name: name.trim().to_string(),
+            })
         })
         .collect()
 }
@@ -134,7 +145,12 @@ pub fn details(name: &str) -> Result<PrinterDetails, String> {
 /// `lpadmin` arguments for a new printer.
 pub(crate) fn add_args(p: &NewPrinter) -> Vec<String> {
     let uri = match &p.connection {
-        Connection::Network { host, protocol, port, queue } => network_uri(host, *protocol, *port, queue.as_deref()),
+        Connection::Network {
+            host,
+            protocol,
+            port,
+            queue,
+        } => network_uri(host, *protocol, *port, queue.as_deref()),
         Connection::Device { uri } => uri.clone(),
     };
     let mut args = vec![
@@ -176,7 +192,7 @@ pub(crate) fn update_args(name: &str, e: &PrinterEdit) -> Vec<String> {
 
 pub fn update(name: &str, e: &PrinterEdit) -> Result<(), String> {
     if e.name != name {
-		return Err("CUPS cannot rename a printer. Remove it and add it again with a new name.".into());
+        return Err("CUPS cannot rename a printer. Remove it and add it again with a new name.".into());
     }
     run("lpadmin", &update_args(name, e)).map(|_| ())
 }
@@ -210,21 +226,43 @@ mod tests {
         assert_eq!(o["x"], "a b");
 
         let drivers = parse_drivers("drv:///sample.drv/zebra.ppd Zebra ZPL Label Printer\neverywhere IPP Everywhere\n");
-        assert_eq!(drivers[0], Driver { id: "drv:///sample.drv/zebra.ppd".into(), name: "Zebra ZPL Label Printer".into() });
+        assert_eq!(
+            drivers[0],
+            Driver {
+                id: "drv:///sample.drv/zebra.ppd".into(),
+                name: "Zebra ZPL Label Printer".into()
+            }
+        );
     }
 
     #[test]
     fn lpadmin_arguments() {
         let p = NewPrinter {
             name: "Kasir".into(),
-            connection: Connection::Network { host: "10.0.0.9".into(), protocol: NetProtocol::Raw, port: None, queue: None },
+            connection: Connection::Network {
+                host: "10.0.0.9".into(),
+                protocol: NetProtocol::Raw,
+                port: None,
+                queue: None,
+            },
             driver: Some("drv:///sample.drv/zebra.ppd".into()),
             description: Some("Printer kasir; rm -rf /".into()),
             location: None,
             shared: false,
         };
         let args = add_args(&p);
-        assert_eq!(args[..7], ["-p", "Kasir", "-E", "-v", "socket://10.0.0.9:9100", "-m", "drv:///sample.drv/zebra.ppd"]);
+        assert_eq!(
+            args[..7],
+            [
+                "-p",
+                "Kasir",
+                "-E",
+                "-v",
+                "socket://10.0.0.9:9100",
+                "-m",
+                "drv:///sample.drv/zebra.ppd"
+            ]
+        );
         // Passed as one argument, never interpreted by a shell.
         assert!(args.contains(&"Printer kasir; rm -rf /".to_string()));
         let driverless = NewPrinter { driver: None, ..p };

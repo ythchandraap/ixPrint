@@ -119,7 +119,11 @@ pub fn job_status(printer: &str, spooler_job: &str) -> Result<JobStatus, String>
             } else {
                 job.state
             };
-            (state, Some(job.position), job.message.clone().or_else(|| q.message.clone()))
+            (
+                state,
+                Some(job.position),
+                job.message.clone().or_else(|| q.message.clone()),
+            )
         }
         None if backend::was_completed(printer, spooler_job) => (JobState::Completed, None, None),
         None => (JobState::Gone, None, None),
@@ -177,12 +181,7 @@ pub fn default_paper_mm(printer: &str) -> (f32, f32) {
 
 /// Sends the print-ready PDF at `pdf` to `printer`. Returns the spooler's job
 /// reference when it gives one.
-pub fn print(
-    printer: &str,
-    pdf: &Path,
-    sheets: &[Sheet],
-    options: &DeviceOptions,
-) -> Result<Option<String>, String> {
+pub fn print(printer: &str, pdf: &Path, sheets: &[Sheet], options: &DeviceOptions) -> Result<Option<String>, String> {
     backend::print(printer, pdf, sheets, options)
 }
 
@@ -261,14 +260,25 @@ mod live_probe {
         for p in super::list_printers() {
             println!("{:?}", p);
             match super::capabilities(&p.name) {
-                Ok(c) => println!("  papers={} default={:?} trays={:?} duplex={} color={}", c.papers.len(), c.default_paper, c.trays, c.duplex, c.color),
+                Ok(c) => println!(
+                    "  papers={} default={:?} trays={:?} duplex={} color={}",
+                    c.papers.len(),
+                    c.default_paper,
+                    c.trays,
+                    c.duplex,
+                    c.color
+                ),
                 Err(e) => println!("  caps error: {}", e),
             }
             println!("  default_paper_mm={:?}", super::default_paper_mm(&p.name));
         }
         println!("os default: {:?}", super::os_default_printer());
         for p in super::list_printers() {
-            println!("queue {}: {:?}", p.name, super::queue(&p.name).map(|q| (q.status, q.message, q.jobs.len())));
+            println!(
+                "queue {}: {:?}",
+                p.name,
+                super::queue(&p.name).map(|q| (q.status, q.message, q.jobs.len()))
+            );
         }
         if let Ok(job) = std::env::var("ixPrint_PROBE_JOB") {
             let (printer, id) = job.split_once('|').unwrap();

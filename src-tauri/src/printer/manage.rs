@@ -118,13 +118,13 @@ pub fn add(printer: &NewPrinter) -> Result<(), String> {
     validate_connection(&printer.connection)?;
     if let Some(d) = &printer.driver {
         if d.trim().is_empty() || d.chars().any(char::is_control) {
-			return Err("Invalid driver".into());
+            return Err("Invalid driver".into());
         }
     }
-	logged("add", &printer.name, os::add(printer))?;
+    logged("add", &printer.name, os::add(printer))?;
     if !installed(&printer.name) {
         return Err(format!(
-			"The add command completed, but printer '{}' did not appear in the system printer list.",
+            "The add command completed, but printer '{}' did not appear in the system printer list.",
             printer.name
         ));
     }
@@ -135,22 +135,22 @@ pub fn update(name: &str, edit: &PrinterEdit) -> Result<(), String> {
     validate_name(&edit.name)?;
     validate_text(&edit.description)?;
     validate_text(&edit.location)?;
-	logged("update", name, os::update(name, edit))?;
+    logged("update", name, os::update(name, edit))?;
     if !installed(&edit.name) {
-		return Err(format!("Printer '{}' was not found after being updated.", edit.name));
+        return Err(format!("Printer '{}' was not found after being updated.", edit.name));
     }
     Ok(())
 }
 
 pub fn remove(name: &str) -> Result<(), String> {
     if !installed(name) {
-		return Err(format!("Printer '{}' is not installed on the system.", name));
+        return Err(format!("Printer '{}' is not installed on the system.", name));
     }
-	logged("remove", name, os::remove(name))?;
+    logged("remove", name, os::remove(name))?;
     // Trust the OS list, not the command's exit code.
     if installed(name) {
         return Err(format!(
-			"The remove command completed, but printer '{}' is still listed by the system. \
+            "The remove command completed, but printer '{}' is still listed by the system. \
 			 Try removing it from the operating system's printer settings.",
             name
         ));
@@ -167,28 +167,40 @@ fn installed(name: &str) -> bool {
 fn logged(action: &str, name: &str, result: Result<(), String>) -> Result<(), String> {
     match &result {
         Ok(()) => eprintln!("[ix.print] printer {} '{}': ok", action, name),
-		Err(e) => eprintln!("[ix.print] printer {} '{}' failed: {}", action, name, e),
+        Err(e) => eprintln!("[ix.print] printer {} '{}' failed: {}", action, name, e),
     }
     result.map_err(explain)
 }
 
 pub fn set_os_default(name: &str) -> Result<(), String> {
-	logged("set as default", name, os::set_os_default(name))
+    logged("set as default", name, os::set_os_default(name))
 }
 
 /// Turns permission failures into an actionable message.
 fn explain(e: String) -> String {
     let lower = e.to_lowercase();
-    if ["forbidden", "not authorized", "access is denied", "akses ditolak", "permission", "unauthorized", "0x00000005"]
-        .iter()
-        .any(|k| lower.contains(k))
+    if [
+        "forbidden",
+        "not authorized",
+        "access is denied",
+        "akses ditolak",
+        "permission",
+        "unauthorized",
+        "0x00000005",
+    ]
+    .iter()
+    .any(|k| lower.contains(k))
     {
         let how = if cfg!(windows) {
-			"run ix.print with \"Run as administrator\""
+            "run ix.print with \"Run as administrator\""
         } else {
-			"use an administrator account (Linux: member of the lpadmin group)"
+            "use an administrator account (Linux: member of the lpadmin group)"
         };
-		format!("Administrator rights are required to change the printer: {}. ({})", how, e.trim())
+        format!(
+            "Administrator rights are required to change the printer: {}. ({})",
+            how,
+            e.trim()
+        )
     } else {
         e
     }
@@ -204,16 +216,16 @@ pub fn validate_name(name: &str) -> Result<(), String> {
     if name_ok {
         Ok(())
     } else if cfg!(windows) {
-		Err("Printer name: letters, numbers, spaces, _ - . (max. 127)".into())
+        Err("Printer name: letters, numbers, spaces, _ - . (max. 127)".into())
     } else {
-		Err("Printer name: letters, numbers, _ - . without spaces (max. 127)".into())
+        Err("Printer name: letters, numbers, _ - . without spaces (max. 127)".into())
     }
 }
 
 fn validate_text(v: &Option<String>) -> Result<(), String> {
     match v {
         Some(t) if t.chars().count() > 200 || t.chars().any(char::is_control) => {
-			Err("Description/location must be at most 200 characters with no line breaks".into())
+            Err("Description/location must be at most 200 characters with no line breaks".into())
         }
         _ => Ok(()),
     }
@@ -222,25 +234,29 @@ fn validate_text(v: &Option<String>) -> Result<(), String> {
 fn valid_host(host: &str) -> bool {
     !host.is_empty()
         && host.len() <= 253
-        && host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
 }
 
 fn validate_connection(c: &Connection) -> Result<(), String> {
     match c {
         Connection::Network { host, queue, .. } => {
             if !valid_host(host) {
-				return Err("Printer address is invalid (IP or hostname)".into());
+                return Err("Printer address is invalid (IP or hostname)".into());
             }
             if let Some(q) = queue {
-                if q.chars().any(|c| c.is_whitespace() || c.is_control() || matches!(c, '?' | '#')) {
-					return Err("Queue/path name is invalid".into());
+                if q.chars()
+                    .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '?' | '#'))
+                {
+                    return Err("Queue/path name is invalid".into());
                 }
             }
             Ok(())
         }
         Connection::Device { uri } => {
             if uri.trim().is_empty() || uri.chars().any(|c| c.is_whitespace() || c.is_control()) {
-				Err("Device URI/port is invalid".into())
+                Err("Device URI/port is invalid".into())
             } else {
                 Ok(())
             }
@@ -252,7 +268,12 @@ fn validate_connection(c: &Connection) -> Result<(), String> {
 pub fn network_uri(host: &str, protocol: NetProtocol, port: Option<u16>, queue: Option<&str>) -> String {
     let queue = queue.map(|q| q.trim_start_matches('/')).filter(|q| !q.is_empty());
     match protocol {
-        NetProtocol::Ipp => format!("ipp://{}:{}/{}", host, port.unwrap_or(631), queue.unwrap_or("ipp/print")),
+        NetProtocol::Ipp => format!(
+            "ipp://{}:{}/{}",
+            host,
+            port.unwrap_or(631),
+            queue.unwrap_or("ipp/print")
+        ),
         NetProtocol::Raw => format!("socket://{}:{}", host, port.unwrap_or(9100)),
         NetProtocol::Lpd => format!("lpd://{}/{}", host, queue.unwrap_or("queue")),
     }
@@ -269,20 +290,40 @@ mod tests {
         assert!(validate_name("a/b").is_err());
         assert!(validate_name(" x").is_err());
         assert_eq!(validate_name("Printer Kasir").is_ok(), cfg!(windows));
-        let net = |host: &str| Connection::Network { host: host.into(), protocol: NetProtocol::Ipp, port: None, queue: None };
+        let net = |host: &str| Connection::Network {
+            host: host.into(),
+            protocol: NetProtocol::Ipp,
+            port: None,
+            queue: None,
+        };
         assert!(validate_connection(&net("192.168.1.20")).is_ok());
         assert!(validate_connection(&net("printer.local")).is_ok());
         assert!(validate_connection(&net("1.2.3.4/../x")).is_err());
         assert!(validate_connection(&net("a;rm -rf")).is_err());
-        assert!(validate_connection(&Connection::Device { uri: "usb://Zebra/ZD230?serial=1".into() }).is_ok());
-        assert!(validate_connection(&Connection::Device { uri: "usb://x y".into() }).is_err());
+        assert!(validate_connection(&Connection::Device {
+            uri: "usb://Zebra/ZD230?serial=1".into()
+        })
+        .is_ok());
+        assert!(validate_connection(&Connection::Device {
+            uri: "usb://x y".into()
+        })
+        .is_err());
     }
 
     #[test]
     fn uris() {
-        assert_eq!(network_uri("10.0.0.5", NetProtocol::Ipp, None, None), "ipp://10.0.0.5:631/ipp/print");
-        assert_eq!(network_uri("10.0.0.5", NetProtocol::Raw, None, None), "socket://10.0.0.5:9100");
-        assert_eq!(network_uri("10.0.0.5", NetProtocol::Lpd, None, Some("/lp1")), "lpd://10.0.0.5/lp1");
+        assert_eq!(
+            network_uri("10.0.0.5", NetProtocol::Ipp, None, None),
+            "ipp://10.0.0.5:631/ipp/print"
+        );
+        assert_eq!(
+            network_uri("10.0.0.5", NetProtocol::Raw, None, None),
+            "socket://10.0.0.5:9100"
+        );
+        assert_eq!(
+            network_uri("10.0.0.5", NetProtocol::Lpd, None, Some("/lp1")),
+            "lpd://10.0.0.5/lp1"
+        );
     }
 
     #[test]
