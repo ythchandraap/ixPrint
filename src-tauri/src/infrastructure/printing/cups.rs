@@ -1,9 +1,11 @@
 //! macOS / Linux backend: CUPS command-line tools. Arguments are passed
 //! directly (no shell), so printer and file names cannot inject commands.
 
-use super::{paper_size_from_name, Capabilities, DeviceOptions, JobState, PaperInfo, Printer, PrinterQueue, QueueJob};
-use crate::layout::Sheet;
-use crate::settings::{pt_to_mm, ColorMode, Duplex, Paper};
+use crate::domain::layout::Sheet;
+use crate::domain::printer::{
+    paper_size_from_name, Capabilities, DeviceOptions, JobState, PaperInfo, Printer, PrinterQueue, QueueJob,
+};
+use crate::domain::settings::{pt_to_mm, ColorMode, Duplex, Paper};
 use std::path::Path;
 use std::process::Command;
 

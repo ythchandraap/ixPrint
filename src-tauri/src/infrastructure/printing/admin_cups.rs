@@ -1,7 +1,7 @@
 //! Printer management on macOS / Linux via CUPS tools (`lpinfo`, `lpadmin`,
 //! `lpoptions`). Arguments are passed directly, never through a shell.
 
-use super::manage::{network_uri, Connection, Device, Driver, NewPrinter, PrinterDetails, PrinterEdit};
+use crate::domain::printer_admin::{network_uri, Connection, Device, Driver, NewPrinter, PrinterDetails, PrinterEdit};
 use std::collections::HashMap;
 use std::process::Command;
 
@@ -209,7 +209,7 @@ pub fn set_os_default(name: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::printer::manage::NetProtocol;
+    use crate::domain::printer_admin::NetProtocol;
 
     #[test]
     fn parses_lpinfo_and_lpoptions() {

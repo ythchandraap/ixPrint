@@ -3,6 +3,8 @@ pub mod diagnostics;
 pub mod history;
 pub mod layout;
 pub mod preset;
+pub mod printer;
+pub mod printer_admin;
 pub mod remote;
 pub mod settings;
 pub mod settings_config;
