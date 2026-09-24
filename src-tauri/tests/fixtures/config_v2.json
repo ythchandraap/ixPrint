@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "server_port": 18032,
+  "presets": {},
+  "history_retention_days": 90,
+  "require_token": true,
+  "allowed_origins": [],
+  "bridge_enabled": true,
+  "tokens": []
+}
