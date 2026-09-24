@@ -2,7 +2,7 @@
 import { onMounted, ref, watch } from "vue";
 import { BookOpen, ExternalLink, FolderOpen, Network, Server, ShieldCheck } from "lucide-vue-next";
 import { api, errorText, type Config } from "../api";
-import ApiTab from "./ApiTab.vue";
+import ApiTab from "@/features/api-tokens/ApiTab.vue";
 import ErrorLogPanel from "./ErrorLogPanel.vue";
 import RemotesPanel from "./RemotesPanel.vue";
 import SettingInfo from "./SettingInfo.vue";
