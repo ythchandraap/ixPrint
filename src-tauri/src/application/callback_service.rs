@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::application::state::AppState;
-use crate::callback::{Attempt, Callback, Payload};
+use crate::domain::callback::{Attempt, Callback, Payload};
 use crate::domain::history::CallbackStatus;
 use crate::domain::job::JobResult;
 

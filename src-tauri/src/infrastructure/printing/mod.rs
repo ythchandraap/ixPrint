@@ -161,3 +161,7 @@ mod live_probe {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "job_tests.rs"]
+mod job_tests;

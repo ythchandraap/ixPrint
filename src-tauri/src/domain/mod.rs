@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod callback;
 pub mod diagnostics;
 pub mod history;
 pub mod job;

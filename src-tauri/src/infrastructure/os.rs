@@ -1,5 +1,15 @@
 use crate::application::ports::Clock;
 
+pub fn lan_url(port: u16) -> Option<String> {
+    local_ip_address::local_ip()
+        .ok()
+        .map(|ip| format!("http://{}:{}", ip, port))
+}
+
+pub fn local_ip() -> Option<String> {
+    local_ip_address::local_ip().ok().map(|ip| ip.to_string())
+}
+
 #[derive(Default)]
 pub struct SystemClock;
 
