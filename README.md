@@ -46,8 +46,27 @@ bun run tauri dev
 target: `bun run fetch-pdfium win-x64` (`win-x64`, `win-arm64`, `mac-x64`,
 `mac-arm64`, `linux-x64`, `linux-arm64`). Linux needs CUPS installed.
 
-Tests (`cd src-tauri && cargo test --lib`) include layout checks that render
-real PDFs with PDFium.
+### Development gates
+
+Run these Rust checks from `src-tauri`:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test --lib
+cargo test --test '*'
+```
+
+The library tests include layout checks that render real PDFs with PDFium, so
+fetch the current platform's PDFium target before running them. Frontend type
+checking and production build run at the repository root:
+
+```bash
+bun run build
+```
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for backend boundaries and
+module placement.
 
 ## HTTP API
 
