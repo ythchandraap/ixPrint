@@ -2,9 +2,6 @@
 import { onMounted, ref, watch } from "vue";
 import { BookOpen, ExternalLink, FolderOpen, Network, Server, ShieldCheck } from "lucide-vue-next";
 import { api, errorText, type Config } from "@/shared/api";
-import ApiTab from "@/features/api-tokens/ApiTab.vue";
-import ErrorLogPanel from "@/features/diagnostics/ErrorLogPanel.vue";
-import RemotesPanel from "@/features/remotes/RemotesPanel.vue";
 import SettingInfo from "@/shared/ui/SettingInfo.vue";
 
 const props = defineProps<{ config: Config; localIp: string; os: string }>();
@@ -78,7 +75,7 @@ async function openDataFolder() {
 
 <template>
 	<section class="settings-page stack">
-		<ErrorLogPanel :show-system-logs="props.os === 'windows'" @copy="emit('copy', $event)" @notify="(m, e) => emit('notify', m, e)" />
+		<slot name="diagnostics" :show-system-logs="props.os === 'windows'" />
 
 		<section class="settings-group">
 			<div class="settings-group-heading">
@@ -134,13 +131,7 @@ async function openDataFolder() {
 					<p class="info-note">Tokens are stored as hashes. The full token is shown only once when created.</p>
 				</SettingInfo>
 			</div>
-			<ApiTab
-				:config="config"
-				:local-ip="localIp"
-				@config="emit('config', $event)"
-				@notify="(m, e) => emit('notify', m, e)"
-				@copy="emit('copy', $event)"
-			/>
+			<slot name="api" :config="config" :local-ip="localIp" />
 		</section>
 
 		<section class="settings-group">
@@ -159,7 +150,7 @@ async function openDataFolder() {
 					<p class="info-note">Remote forwarding is limited to one hop. Use HTTPS or a trusted LAN when sending tokens and print data.</p>
 				</SettingInfo>
 			</div>
-			<RemotesPanel @notify="(m, e) => emit('notify', m, e)" @printers-changed="emit('printers-changed')" />
+			<slot name="remotes" />
 		</section>
 
 		<section class="settings-group">

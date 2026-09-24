@@ -105,7 +105,11 @@ function imported(config: Config, list: string[]) {
 		:server-port="serverPort"
 		@saved="saved"
 		@cancel="view = { kind: 'list' }"
-	/>
+	>
+		<template #design-editor="editorProps">
+			<slot name="design-editor" v-bind="editorProps" />
+		</template>
+	</PresetForm>
 
 	<ImportDialog
 		v-else-if="view.kind === 'import'"

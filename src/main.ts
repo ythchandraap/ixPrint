@@ -1,6 +1,6 @@
 import { createApp } from "vue";
-import App from "./App.vue";
-import { api, isInApp } from "./api";
+import App from "./app/App.vue";
+import { api, isInApp } from "@/shared/api";
 
 function errorMessage(value: unknown): string {
 	if (value instanceof Error) return value.message;
