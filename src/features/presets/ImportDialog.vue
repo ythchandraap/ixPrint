@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { reactive, ref, watch } from "vue";
-import { api, errorText, summarize, type Config, type ImportAction, type ImportPreview, type PrinterView } from "../api";
-import AutocompleteField from "./AutocompleteField.vue";
+import { api, errorText, type Config, type ImportAction, type ImportPreview, type PrinterView } from "@/shared/api";
+import { summarize } from "@/shared/lib/preset";
+import AutocompleteField from "@/components/AutocompleteField.vue";
 
 const props = defineProps<{
 	path: string;
