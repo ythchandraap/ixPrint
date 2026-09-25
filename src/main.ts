@@ -1,6 +1,7 @@
 import { createApp } from "vue";
-import App from "./App.vue";
-import { api, isInApp } from "./api";
+import App from "./app/App.vue";
+import { initializeAppearance } from "./app/appearance";
+import { api, isInApp } from "@/shared/api";
 
 function errorMessage(value: unknown): string {
 	if (value instanceof Error) return value.message;
@@ -23,6 +24,8 @@ window.addEventListener("unhandledrejection", (event) => {
 	const reason = event.reason;
 	report("promise", errorMessage(reason), reason instanceof Error ? reason.stack : undefined);
 });
+
+initializeAppearance();
 
 if (import.meta.env.PROD) {
 	// No webview menu (reload, view source, …) in release builds, except in text fields for copy/paste.

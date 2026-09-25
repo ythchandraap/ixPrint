@@ -1,8 +1,8 @@
 # ix.print
 
-*itz.ixxyyzz / ix.print — a product by IX Systems.*
+*ixxyyss / ix.print — a product by IX Systems.*
 
-`itz.ixxyyzz` is the parent technology studio brand. `ix.print` is the
+`ixxyyss` is the parent technology studio brand. `ix.print` is the
 printing product, so product-facing actions and technical documentation use
 `ix.print`, while the application shell carries the parent brand.
 
@@ -46,8 +46,27 @@ bun run tauri dev
 target: `bun run fetch-pdfium win-x64` (`win-x64`, `win-arm64`, `mac-x64`,
 `mac-arm64`, `linux-x64`, `linux-arm64`). Linux needs CUPS installed.
 
-Tests (`cd src-tauri && cargo test --lib`) include layout checks that render
-real PDFs with PDFium.
+### Development gates
+
+Run these Rust checks from `src-tauri`:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+cargo test --lib
+cargo test --test '*'
+```
+
+The library tests include layout checks that render real PDFs with PDFium, so
+fetch the current platform's PDFium target before running them. Frontend type
+checking and production build run at the repository root:
+
+```bash
+bun run build
+```
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for backend boundaries and
+module placement.
 
 ## HTTP API
 
@@ -57,6 +76,7 @@ real PDFs with PDFium.
 | `POST` | `/test-page?count=…&…` | Prints the edge-to-edge calibration page: `count` pages (1–50, default 1), other parameters as `/print` (no upload) |
 | `GET` | `/job-status?job_id=…` | Where a job is now (see below) |
 | `POST` | `/print` (JSON) | Body `{preset, data, settings?}`: fill a preset's design and print it (see below) |
+| `POST` | `/preflight` (JSON) | Validate the same designed-preset body without printing; returns `{valid, errors, fields, required_fields, records}` |
 | `GET` | `/templates` | Presets that have a design, with the `fields` each expects and sample data |
 | `POST` | `/print-template` | Older form of the JSON print: `{template, data}` where `template` is the preset name |
 | `GET` | `/queue?printer=…` | Printer status/problem and its spooler queue `{status, message, jobs: [{id, document, position, state, message, pages, pages_printed}]}` |
@@ -64,9 +84,18 @@ real PDFs with PDFium.
 | `GET` | `/printer-capabilities?printer=…` | Papers, trays, duplex, color |
 | `GET` | `/presets` | Presets and defaults on this computer (read-only) |
 | `GET` | `/presets/export` | Same, as an importable preset file |
+| `GET` | `/presets/shared` | Names and design flags for presets explicitly shared over LAN |
+| `GET` | `/presets/shared/export?name=…` | One published shared preset as an importable bundle |
 
 Errors are `{message}` with status 400 (bad parameters, unknown preset or
 printer), 401 (missing/invalid token) or 500 (document or printer failure).
+For print requests, send a unique `Idempotency-Key` header (1–128 visible ASCII
+characters) per logical job. Repeating the same request with that key within
+24 hours returns the original job with `replayed: true`; changed content gives
+409. A request still being processed returns 202, so check its `job_id` before
+retrying. Reuse the key across network retries, and create a new key only for
+a deliberate new print. The key is scoped to the API token (or client IP when
+tokens are optional).
 Presets, tokens and the default printer can only be changed from the ix.print
 window. Interactive docs with "try it" forms: `http://<ip>:<server-port>/docs`.
 
@@ -79,6 +108,14 @@ token (with no token created yet, every API request is refused).
 A wrong or revoked token is always rejected; 10 wrong tokens from one IP within
 a minute lock that IP out (429) for 5 minutes. Send it as
 `Authorization: Bearer fxp_…` (preferred), `X-Api-Token: fxp_…` or `?token=fxp_…`.
+
+The two `/presets/shared` endpoints always require a valid `Authorization: Bearer`
+token, even when **Require a token** is off; they do not accept token query
+parameters or `X-Api-Token`. The shared list endpoint is separately controlled
+by **Allow listing shared presets via API** in Presets and is off by default.
+When it is off, a receiver must already know the preset name; direct export of
+one shared preset remains available. The older `/presets` and `/presets/export`
+endpoints keep their existing behavior and authentication methods.
 
 Browsers may call the API only from the websites listed under **Allowed websites**
 (API tab, e.g. `https://app.example.com`), or from `/docs` itself;
@@ -109,7 +146,10 @@ address behind a TLS reverse proxy.
 
 A preset can carry an optional **design**: a label/receipt drawn in the preset
 form (WYSIWYG — the preview is the real PDFium render): text, lines, boxes,
-barcodes (Code 128), QR codes and images/logos. The editor accepts any image
+barcodes (Code 128), QR codes and images/logos. Start with a product label,
+80 mm receipt list, or blank canvas; the editor includes rulers, a 5 mm grid,
+snap, alignment, zoom, undo/redo, and arrow keys for precise placement.
+The editor accepts any image
 format the system can open (PNG, JPEG, SVG, WebP, GIF, BMP, AVIF, HEIC on
 macOS) and stores it as PNG/JPEG. Text, barcode, QR and image values can contain
 `{{field}}` placeholders; an image field takes a data URL / base64 image
@@ -124,6 +164,14 @@ curl -H "Authorization: Bearer fxp_…" -H "Content-Type: application/json" \
 
 `data` is an array of objects (a single object is also accepted). A design
 has one of two layouts:
+
+Call `POST /preflight` with the same JSON before the first live print or after
+changing the data mapping. Mark essential placeholders as required in the
+design editor; a missing or blank value then fails preflight and print submission.
+The editor can also preview real JSON records before publishing. Edits to an
+existing preset are saved as a local draft: test print the draft, then publish.
+Only the published preset is available to API clients. One previous published
+version can be restored from the Presets tab.
 
 - **Label**: one page per object.
 - **List**: the design has three bands — header, row, footer. Each object is
@@ -143,13 +191,37 @@ of a list, or common text on labels:
 
 `{{no}}`, `{{halaman}}`, `{{total_halaman}}` and `{{jumlah_data}}` are filled in
 automatically; values sent in `data` / `header` override them. Missing
-fields print empty. The page size is the design's; printer, offsets, copies
+optional fields print empty. The page size is the design's; printer, offsets, copies
 etc. come from the preset, overridable with `settings`
 (`{"copies": 2, "printer": "…"}`). Test prints of a preset with a design use
 its sample data. Exported presets include their designs.
 
 Older configs' separate *templates* are moved into presets with a design on
 startup (a name already used by a preset gets " (design)").
+
+### Share preset over LAN
+
+In **Presets**, turn on **Share on LAN** for a published preset. Its published
+settings, design and design sample data can then be fetched by a computer that
+has a valid API token from this computer. Drafts, previous versions, defaults,
+and other configuration are not included. Publishing a change to a shared
+preset makes the new published version available immediately.
+
+Receivers use **Import from remote** to load the optional shared list or enter a
+known preset name, preview it, resolve name conflicts and map printers, then
+import one preset manually. Nothing syncs automatically. Each LAN import fetches
+the bundle again and refuses to apply it if it changed after preview.
+
+```bash
+curl -H "Authorization: Bearer fxp_…" \
+  "http://192.168.1.10:18032/presets/shared"
+curl -H "Authorization: Bearer fxp_…" \
+  "http://192.168.1.10:18032/presets/shared/export?name=Label%20Produk"
+```
+
+The list response contains only `{name, has_design}` entries. The export
+response is an importable `PresetBundle` with exactly one preset and no default
+printer or default preset.
 
 ### Calibration page
 
@@ -173,10 +245,11 @@ horizontal coverage, and a light center cross shows centering.
 
 `state` is one of `queued`, `printing`, `paused`, `error` (the job or the printer
 reports a problem such as paper out, jam or offline; it may resume once fixed),
-`completed`, `gone` (left the queue without a known result, e.g. cancelled),
+`completed` (reported by the spooler), `gone` (left the queue without a known result, e.g. cancelled),
 `failed` (ix.print could not send it; `message` says why) or `unknown`.
 Poll it every few seconds until it reaches `completed`, `gone` or `failed`.
-Jobs are looked up in today's and yesterday's history.
+Jobs remain searchable across retained history; live queue status is only
+queried for jobs less than two days old.
 
 ### Result callback
 
@@ -191,9 +264,9 @@ ix.print POSTs:
   "sheets": 1, "time": "2026-09-22T10:15:03+07:00" }
 ```
 
-`state`/`success`: `completed`/true, `sent`/true (spooler gives no job status),
-`failed`/false, `gone`/false (left the queue unfinished, e.g. cancelled),
-`timeout`/false (not done after 60 min). A printer problem before that sends
+`state`/`success`: `completed`/true (spooler report), `sent`/null (spooler gives no job status),
+`failed`/false, `gone`/null (left the queue with unknown outcome),
+`timeout`/null (no final report after 60 min). A printer problem before that sends
 one `job.problem` (`state: "error"`, `success: null`). Requests rejected up
 front (400/500) get no callback. Delivery needs a 2xx within 10 s, is retried
 after 5 s, 30 s and 2 min, never follows redirects, and may repeat — dedupe on
@@ -203,9 +276,11 @@ Each delivery is signed with the token used to print:
 `X-IxPrint-Signature: sha256=<hex HMAC-SHA256("{X-IxPrint-Timestamp}.{raw body}")>`
 with key = hex SHA-256 of the token. Examples for Node.js and PHP are on `/docs`.
 
-The **History** tab shows each job's callback: waiting for the job, retrying
-(with the error), delivered (with the result sent), failed after all attempts,
-or refused. Progress is appended to the job's day file as
+The **History** tab shows each job's callback: waiting, retrying, delivered,
+failed after all attempts, or refused. It can search job IDs and callback references across saved dates,
+retry a failed callback without reprinting, and request cancellation of a local
+ix.print job that is still queued. Pending callbacks resume after an app restart;
+the receiver should still deduplicate deliveries. Progress is appended to the job's day file as
 `{"callback_for": job_id, "callback": {…}}` lines, merged into the job on read.
 
 ### `/print` parameters
@@ -261,6 +336,7 @@ Stored in the app data folder (`%APPDATA%\ixPrint`,
 `~/Library/Application Support/ixPrint`, `~/.local/share/ixPrint`; the folder keeps the
 original app identifier `ixPrint` so existing settings, tokens and history carry over):
 
-- `config.json`: default printer, default preset, presets, templates, token hashes (previous version in `config.json.bak`)
+- `config.json`: default printer, published presets, local drafts and previous preset versions, token hashes (previous file in `config.json.bak`)
 - `history/YYYY-MM-DD.jsonl`: print history, one file per day, pruned after the retention period (default 90 days)
+- `api-access-log.jsonl`: rotating API request/response metadata log; authorization values, query strings and bodies are excluded
 - `jobs/`: temporary files, deleted after each job and on startup
