@@ -473,18 +473,18 @@ onBeforeUnmount(() => {
 .print-form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 18px 16px 24px;
+  gap: var(--stack-gap);
+  padding: 12px 12px 16px;
 }
 .print-heading {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: var(--row-gap);
 }
 .source-picker {
   display: flex;
-  gap: 18px;
+  gap: 12px;
   margin: 0;
   padding: 8px 10px 10px;
   border: 1px solid var(--line);
@@ -493,9 +493,10 @@ onBeforeUnmount(() => {
 .source-picker label {
   display: inline-flex;
   align-items: center;
+  min-height: var(--row-height);
   gap: 6px;
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
   cursor: pointer;
 }
 .count-field {
@@ -521,14 +522,14 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 .pdf-picker {
-  min-height: 76px;
-  padding: 12px;
+  min-height: 64px;
+  padding: 8px 10px;
   border: 1px dashed var(--line);
   border-radius: var(--r-md);
 }
 .pdf-picker strong {
   display: block;
-  font-size: 13px;
+  font-size: 14px;
 }
 .pdf-picker .hint {
   margin-top: 3px;
@@ -536,7 +537,7 @@ onBeforeUnmount(() => {
 .pdf-preview {
   display: flex;
   justify-content: center;
-  padding: 10px;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--surface);
@@ -549,20 +550,21 @@ onBeforeUnmount(() => {
 .summary {
   display: grid;
   gap: 6px;
-  padding: 12px;
+  padding: 8px 10px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
 }
 .summary > strong {
   margin-bottom: 2px;
-  font-size: 13px;
+  font-size: 14px;
 }
 .summary > div {
   display: grid;
   grid-template-columns: 160px minmax(0, 1fr);
   gap: 8px;
   font-size: 12px;
+  line-height: 18px;
 }
 .summary span {
   color: var(--muted);
@@ -575,12 +577,13 @@ onBeforeUnmount(() => {
   margin: -4px 0 0;
   padding-left: 20px;
   color: var(--danger);
-  font-size: 12px;
+  font-size: 14px;
+  line-height: 21px;
 }
 .inline-action {
   display: flex;
   justify-content: flex-start;
-  margin-top: -8px;
+  margin-top: -4px;
 }
 .submit-error {
   margin: -4px 0 0;
@@ -593,24 +596,25 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 .job-result {
-  padding: 12px;
+  padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--surface);
 }
 .job-result-heading strong {
-  font-size: 13px;
+  font-size: 14px;
 }
 .job-result dl {
   display: grid;
   gap: 5px;
-  margin: 10px 0 0;
+  margin: 8px 0 0;
 }
 .job-result dl > div {
   display: grid;
   grid-template-columns: 112px minmax(0, 1fr);
   gap: 8px;
   font-size: 12px;
+  line-height: 18px;
 }
 .job-result dt {
   color: var(--muted);
@@ -623,6 +627,7 @@ onBeforeUnmount(() => {
 .state {
   color: var(--muted);
   font-size: 12px;
+  line-height: 18px;
 }
 .state.error,
 .state.failed {

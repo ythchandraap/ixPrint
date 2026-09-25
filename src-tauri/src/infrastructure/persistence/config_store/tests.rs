@@ -43,6 +43,8 @@ fn origins_and_secure_defaults() {
     assert!(old.lan_access);
     assert_eq!(old.allowed_origins, vec!["*"]);
     assert_eq!(old.server_port, DEFAULT_SERVER_PORT);
+    assert!(old.shared_presets.is_empty());
+    assert!(!old.preset_list_endpoint_enabled);
     let mut c = Config {
         allowed_origins: vec!["https://A.id".into()],
         ..Config::default()
@@ -51,6 +53,18 @@ fn origins_and_secure_defaults() {
     c.allowed_origins = Vec::new();
     c.server_port = 1023;
     assert!(c.validate().is_err());
+}
+
+#[test]
+fn shared_presets_must_be_published() {
+    let mut config = Config::default();
+    config.preset_drafts.insert("draft-only".into(), Preset::default());
+    config.shared_presets.insert("draft-only".into());
+    assert!(config.validate().unwrap_err().contains("published preset"));
+    config.presets.insert("published".into(), Preset::default());
+    config.shared_presets.clear();
+    config.shared_presets.insert("published".into());
+    assert!(config.validate().is_ok());
 }
 
 #[test]

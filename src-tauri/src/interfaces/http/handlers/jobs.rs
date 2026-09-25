@@ -1,8 +1,9 @@
 use super::super::auth_guard::{acquire_in_flight, authorized};
-use super::super::dto::{
-    error, internal, DataPrint, DataSubmission, LegacyTemplatePrint, State, MAX_JSON_BYTES, MAX_RECORDS,
-    MAX_UPLOAD_BYTES, PDF_HEADER_WINDOW,
+use super::super::dto::{error, internal, DataPrint, DataSubmission, LegacyTemplatePrint, State, MAX_RECORDS};
+use super::job_support::{
+    callback_from_query, fingerprint, idempotency_key, read_json_payload, save_upload, Submission,
 };
+use crate::application::ports::Reservation;
 use crate::application::state::AppState;
 use crate::domain::auth;
 use crate::domain::callback::Callback;
@@ -10,35 +11,109 @@ use crate::domain::job::{Document, JobError, JobRequest};
 use crate::domain::settings::PrintSettings;
 use actix_multipart::Multipart;
 use actix_web::{web, HttpRequest, HttpResponse};
-use futures::StreamExt;
 use std::collections::HashMap;
-use std::io::Write;
 use std::sync::Arc;
+
+/// Validates a designed preset request without rendering or printing it.
+pub(crate) async fn preflight(req: HttpRequest, state: State, mut payload: web::Payload) -> HttpResponse {
+    let token = authorized!(req, state);
+    let body: DataPrint = match read_json_payload(&mut payload).await {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
+    if let Err(message) = Callback::from_request(
+        body.callback_url.as_deref(),
+        body.callback_ref.as_deref(),
+        token.as_ref(),
+    ) {
+        return error(actix_web::http::StatusCode::BAD_REQUEST, &message);
+    }
+    let state = state.get_ref().clone();
+    match web::block(move || {
+        crate::application::preset_service::preflight_data(
+            &state,
+            body.preset.as_deref(),
+            &body.data,
+            body.header.as_ref(),
+            &body.settings,
+        )
+    })
+    .await
+    {
+        Ok(Ok(report)) => HttpResponse::Ok().json(report),
+        Ok(Err(message)) => error(actix_web::http::StatusCode::BAD_REQUEST, &message),
+        Err(e) => internal(e),
+    }
+}
 
 /// Runs a job on the blocking pool and answers like `/print`.
 async fn submit(
     state: Arc<AppState>,
-    request: JobRequest,
+    mut request: JobRequest,
     message: &str,
     cleanup: Option<std::path::PathBuf>,
     callback: Option<Callback>,
+    idempotency: Option<String>,
 ) -> HttpResponse {
     let watcher = state.clone();
+    let fingerprint_callback = callback.clone();
     let outcome = web::block(move || {
+        let request_fingerprint = if idempotency.is_some() {
+            Some(fingerprint(&request, fingerprint_callback.as_ref()).map_err(JobError::Failed)?)
+        } else {
+            None
+        };
+        if let (Some(key), Some(fingerprint)) = (idempotency, request_fingerprint) {
+            let job_id = uuid::Uuid::new_v4().to_string();
+            match state
+                .idempotency
+                .reserve(&key, &fingerprint, &job_id)
+                .map_err(JobError::Failed)?
+            {
+                Reservation::New => request.job_id = Some(job_id),
+                Reservation::Existing(id) => {
+                    return match state.history.find(&id) {
+                        Some(entry) if entry.success => {
+                            let result = crate::domain::job::JobResult {
+                                job_id: entry.id,
+                                printer: entry.printer,
+                                preset: entry.preset,
+                                sheets: entry.sheets,
+                                spooler_job: entry.spooler_job,
+                            };
+                            let status = crate::application::printer_service::job_status_json(&state, &result.job_id);
+                            Ok(Submission::Replay(result, status))
+                        }
+                        Some(entry) => Err(JobError::BadRequest(format!(
+                            "Original request failed: {}. Use a new Idempotency-Key to retry",
+                            entry.error.unwrap_or_default()
+                        ))),
+                        None => Ok(Submission::Pending(Some(id))),
+                    };
+                }
+                Reservation::Pending => return Ok(Submission::Pending(None)),
+                Reservation::Conflict => return Ok(Submission::Conflict),
+            }
+        }
         let result = crate::application::job_service::run(&state, request);
         // Queue position right after submission, so clients can show it immediately.
         let status = result
             .as_ref()
             .ok()
             .and_then(|r| crate::application::printer_service::job_status_json(&state, &r.job_id));
-        result.map(|r| (r, status))
+        result.map(|r| Submission::New(r, status))
     })
     .await;
     if let Some(file) = cleanup {
         let _ = std::fs::remove_file(file);
     }
     match outcome {
-        Ok(Ok((r, status))) => {
+        Ok(Ok(submission @ (Submission::New(_, _) | Submission::Replay(_, _)))) => {
+            let replayed = matches!(submission, Submission::Replay(_, _));
+            let (r, status) = match submission {
+                Submission::New(r, status) | Submission::Replay(r, status) => (r, status),
+                Submission::Pending(_) | Submission::Conflict => unreachable!(),
+            };
             let mut body = serde_json::json!({
                 "message": message,
                 "job_id": r.job_id,
@@ -47,16 +122,28 @@ async fn submit(
                 "sheets": r.sheets,
                 "spooler_job": r.spooler_job,
                 "status": status,
+                "replayed": replayed,
             });
-            if let Some(cb) = callback {
-                // The job is already printing: a refused callback is reported, not an error.
-                body["callback"] = match crate::application::callback_service::watch(watcher, &r, cb) {
-                    Ok(()) => serde_json::json!({ "status": "watching" }),
-                    Err(e) => serde_json::json!({ "status": "refused", "message": e }),
-                };
+            if !replayed {
+                if let Some(cb) = callback {
+                    // The job is already printing: a refused callback is reported, not an error.
+                    body["callback"] = match crate::application::callback_service::watch(watcher, &r, cb) {
+                        Ok(()) => serde_json::json!({ "status": "watching" }),
+                        Err(e) => serde_json::json!({ "status": "refused", "message": e }),
+                    };
+                }
             }
             HttpResponse::Ok().json(body)
         }
+        Ok(Ok(Submission::Pending(job_id))) => HttpResponse::Accepted().json(serde_json::json!({
+            "message": "Original request is still processing or its outcome is not yet known",
+            "job_id": job_id,
+            "replayed": true,
+        })),
+        Ok(Ok(Submission::Conflict)) => error(
+            actix_web::http::StatusCode::CONFLICT,
+            "Idempotency-Key was already used with different request content",
+        ),
         Ok(Err(JobError::BadRequest(m))) => error(actix_web::http::StatusCode::BAD_REQUEST, &m),
         Ok(Err(JobError::Failed(m))) => error(
             actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -73,6 +160,10 @@ async fn submit_data(
     token: Option<auth::ApiToken>,
     submission: DataSubmission,
 ) -> HttpResponse {
+    let idempotency = match idempotency_key(req, token.as_ref()) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
     let DataSubmission {
         preset,
         data,
@@ -108,6 +199,7 @@ async fn submit_data(
         Err(e) => return bad(format!("data: {}", e)),
     };
     let request = JobRequest {
+        job_id: None,
         file_name: format!(
             "design {} ({} item(s))",
             preset.as_deref().unwrap_or("default preset"),
@@ -118,10 +210,18 @@ async fn submit_data(
         preset,
         source: "http",
         client: req.peer_addr().map(|a| a.ip().to_string()),
-        token: token.map(|t| t.name),
+        token: token.as_ref().map(|t| t.name.clone()),
         hop: req.headers().contains_key(crate::domain::remote::HOP_HEADER),
     };
-    submit(state.get_ref().clone(), request, "Data sent to printer", None, callback).await
+    submit(
+        state.get_ref().clone(),
+        request,
+        "Data sent to printer",
+        None,
+        callback,
+        idempotency,
+    )
+    .await
 }
 
 /// Older endpoint: `{"template": name, "data": …}` where the template is now a preset with a design.
@@ -162,62 +262,6 @@ pub(crate) async fn print_template(req: HttpRequest, state: State, body: web::By
     .await
 }
 
-/// Saves the first uploaded file of the multipart body; returns (path, original name).
-async fn save_upload(
-    multipart: &mut Multipart,
-    dir: &std::path::Path,
-) -> Result<(std::path::PathBuf, String), HttpResponse> {
-    let bad = |m: &str| error(actix_web::http::StatusCode::BAD_REQUEST, m);
-    while let Some(item) = multipart.next().await {
-        let mut field = item.map_err(|e| bad(&format!("Multipart data is invalid: {}", e)))?;
-        let Some(name) = field
-            .content_disposition()
-            .and_then(|cd| cd.get_filename())
-            .map(sanitize_filename::sanitize)
-        else {
-            continue; // text field
-        };
-        std::fs::create_dir_all(dir).map_err(internal)?;
-        let path = dir.join(format!("{}.pdf", uuid::Uuid::new_v4()));
-        let mut file = std::fs::File::create(&path).map_err(internal)?;
-        let mut size = 0usize;
-        let mut head = Vec::with_capacity(PDF_HEADER_WINDOW);
-        let result = async {
-            while let Some(chunk) = field.next().await {
-                let data = chunk.map_err(|e| bad(&format!("Upload terputus: {}", e)))?;
-                size += data.len();
-                if size > MAX_UPLOAD_BYTES {
-                    return Err(error(
-                        actix_web::http::StatusCode::PAYLOAD_TOO_LARGE,
-                        "File terlalu besar",
-                    ));
-                }
-                let room = PDF_HEADER_WINDOW - head.len();
-                head.extend_from_slice(&data[..room.min(data.len())]);
-                file.write_all(&data).map_err(internal)?;
-            }
-            // Only PDFs go on to PDFium; anything else is refused before parsing.
-            if !head.windows(5).any(|w| w == b"%PDF-") {
-                return Err(bad("File is not a PDF"));
-            }
-            Ok(())
-        }
-        .await;
-        drop(file);
-        if let Err(resp) = result {
-            let _ = std::fs::remove_file(&path);
-            return Err(resp);
-        }
-        let name = if name.is_empty() {
-            "unnamed.pdf".to_string()
-        } else {
-            name
-        };
-        return Ok((path, name));
-    }
-    Err(bad("No file uploaded"))
-}
-
 /// `POST /print`: a PDF upload (multipart, settings in the query) or, with a
 /// JSON body, data for a preset's design.
 pub(crate) async fn print(
@@ -238,22 +282,9 @@ pub(crate) async fn print(
         .is_some_and(|v| v.to_ascii_lowercase().starts_with("application/json"));
 
     if is_json {
-        let mut body = web::BytesMut::new();
-        while let Some(chunk) = payload.next().await {
-            match chunk {
-                Ok(c) if body.len() + c.len() <= MAX_JSON_BYTES => body.extend_from_slice(&c),
-                Ok(_) => return error(actix_web::http::StatusCode::PAYLOAD_TOO_LARGE, "JSON body is too large"),
-                Err(e) => return error(actix_web::http::StatusCode::BAD_REQUEST, &e.to_string()),
-            }
-        }
-        let body: DataPrint = match serde_json::from_slice(&body) {
-            Ok(b) => b,
-            Err(e) => {
-                return error(
-                    actix_web::http::StatusCode::BAD_REQUEST,
-                    &format!("JSON body is invalid: {}", e),
-                )
-            }
+        let body: DataPrint = match read_json_payload(&mut payload).await {
+            Ok(body) => body,
+            Err(response) => return response,
         };
         let callback = (body.callback_url, body.callback_ref);
         return submit_data(
@@ -285,14 +316,22 @@ pub(crate) async fn print(
         Err(resp) => return resp,
     };
     let request = JobRequest {
+        job_id: None,
         document: Document::File(file.clone()),
         file_name,
         settings,
         preset,
         source: "http",
         client: req.peer_addr().map(|a| a.ip().to_string()),
-        token: token.map(|t| t.name),
+        token: token.as_ref().map(|t| t.name.clone()),
         hop: req.headers().contains_key(crate::domain::remote::HOP_HEADER),
+    };
+    let idempotency = match idempotency_key(&req, token.as_ref()) {
+        Ok(value) => value,
+        Err(response) => {
+            let _ = std::fs::remove_file(&file);
+            return response;
+        }
     };
     submit(
         state.get_ref().clone(),
@@ -300,18 +339,9 @@ pub(crate) async fn print(
         "File uploaded and sent to printer",
         Some(file),
         callback,
+        idempotency,
     )
     .await
-}
-
-/// `callback_url` / `callback_ref` from the query of an upload or test page.
-fn callback_from_query(
-    query: &HashMap<String, String>,
-    token: Option<&auth::ApiToken>,
-) -> Result<Option<Callback>, HttpResponse> {
-    let get = |k: &str| query.get(k).map(String::as_str);
-    Callback::from_request(get("callback_url"), get("callback_ref"), token)
-        .map_err(|e| error(actix_web::http::StatusCode::BAD_REQUEST, &e))
 }
 
 /// Prints the calibration page (`count` pages, default 1) with the same
@@ -348,14 +378,19 @@ pub(crate) async fn test_page(
         Err(resp) => return resp,
     };
     let request = JobRequest {
+        job_id: None,
         document: Document::TestPage { pages: count },
         file_name: "ix.print test page.pdf".into(),
         settings,
         preset,
         source: "http",
         client: req.peer_addr().map(|a| a.ip().to_string()),
-        token: token.map(|t| t.name),
+        token: token.as_ref().map(|t| t.name.clone()),
         hop: req.headers().contains_key(crate::domain::remote::HOP_HEADER),
+    };
+    let idempotency = match idempotency_key(&req, token.as_ref()) {
+        Ok(value) => value,
+        Err(response) => return response,
     };
     submit(
         state.get_ref().clone(),
@@ -363,6 +398,7 @@ pub(crate) async fn test_page(
         "Test page sent to printer",
         None,
         callback,
+        idempotency,
     )
     .await
 }

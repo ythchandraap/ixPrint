@@ -11,6 +11,7 @@ import PrintTab from "@/features/print/PrintTab.vue";
 import ApiTab from "@/features/api-tokens/ApiTab.vue";
 import RemotesPanel from "@/features/remotes/RemotesPanel.vue";
 import ErrorLogPanel from "@/features/diagnostics/ErrorLogPanel.vue";
+import ApiAccessLogPanel from "@/features/diagnostics/ApiAccessLogPanel.vue";
 import SettingsView from "@/features/settings/SettingsView.vue";
 import EmptyState from "@/shared/ui/EmptyState.vue";
 import OnboardingDialog from "@/features/settings/OnboardingDialog.vue";
@@ -35,12 +36,18 @@ const {
   printPageOpen,
   requestedPreset,
   tabLabel,
+  navigationStarted,
   settingsOpen,
+  settingsMenu,
+  diagnosticsLog,
+  settingsTitle,
+  appearance,
   onboardingOpen,
   toast,
   refreshing,
   printersLoaded,
   notify,
+  changeAppearance,
   completeOnboarding,
   refreshPrinters,
   openDocs,
@@ -53,6 +60,10 @@ const {
   setTestPages,
   openPrintPage,
   toggleSettings,
+  selectSettingsMenu,
+  selectDiagnosticsLog,
+  backFromSettings,
+  openDiagnostics,
   closePrintPage,
   selectTab,
   reload,
@@ -86,8 +97,13 @@ const {
 
       <p v-if="engineError" class="banner">PDF engine unavailable: {{ engineError }}</p>
       <nav v-if="settingsOpen" class="tabs settings-bar">
-        <button class="icon" title="Back" @click="settingsOpen = false"><ArrowLeft :size="18" /></button>
-        <strong>Settings</strong>
+        <button
+          class="icon"
+          :title="settingsMenu ? 'Back to Settings' : 'Back to app'"
+          :aria-label="settingsMenu ? 'Back to Settings' : 'Back to app'"
+          @click="backFromSettings"
+        ><ArrowLeft :size="18" /></button>
+        <strong>{{ settingsTitle }}</strong>
       </nav>
       <nav v-else class="tabs">
         <button :class="{ on: !printPageOpen && tab === 'printers' }" @click="selectTab('printers')">Printers</button>
@@ -96,105 +112,120 @@ const {
       </nav>
     </div>
 
-    <main v-if="!inApp">
-      <EmptyState
-        :icon="MonitorX"
-        title="Open this in the ix.print app"
-        text="This is the ix.print desktop app and cannot be used directly in a browser. To try the REST API from a browser, open http://<computer-ip>:<server-port>/docs."
-      />
-    </main>
-    <main v-else-if="configError">
-      <EmptyState :icon="MonitorX" tone="warn" title="Settings could not be loaded" :text="configError">
-        <button class="primary small" @click="reload">Try again</button>
-      </EmptyState>
-      <ErrorLogPanel v-if="settingsOpen" :show-system-logs="os === 'windows'" @copy="copy" @notify="notify" />
-    </main>
-    <main v-else-if="!config">
-      <p class="muted center-text">Loading…</p>
-    </main>
-    <main v-else>
-      <SettingsView
-        v-if="settingsOpen"
-        :config="config"
-        :local-ip="bridgeHost"
-        :os="os"
-        @config="setConfig"
-        @notify="notify"
-        @copy="copy"
-        @docs="openDocs"
-        @printers-changed="refreshPrinters"
-      >
-        <template #diagnostics="{ showSystemLogs }">
-          <ErrorLogPanel :show-system-logs="showSystemLogs" @copy="copy" @notify="notify" />
-        </template>
-        <template #api="{ config: settingsConfig, localIp: settingsLocalIp }">
-          <ApiTab
-            :config="settingsConfig"
-            :local-ip="settingsLocalIp"
+    <div class="page-transition-host">
+      <Transition name="page" :css="navigationStarted">
+        <main v-if="!inApp" key="browser-page">
+          <EmptyState
+            :icon="MonitorX"
+            title="Open this in the ix.print app"
+            text="This is the ix.print desktop app and cannot be used directly in a browser. To try the REST API from a browser, open http://<computer-ip>:<server-port>/docs."
+          />
+        </main>
+        <main v-else-if="settingsOpen" key="settings-page" class="settings-main">
+          <SettingsView
+            :config="config"
+            :config-error="configError"
+            :local-ip="bridgeHost"
+            :os="os"
+            :printers="printers"
+            :bridge-ready="serverState === 'ok'"
+            :appearance="appearance"
+            :active-menu="settingsMenu"
+            :diagnostics-log="diagnosticsLog"
             @config="setConfig"
             @notify="notify"
+            @appearance-change="changeAppearance"
+            @menu-change="selectSettingsMenu"
+            @diagnostics-log-change="selectDiagnosticsLog"
             @copy="copy"
+            @docs="openDocs"
+            @printers-changed="refreshPrinters"
+          >
+            <template #diagnostics="{ showSystemLogs, activeLog }">
+              <ErrorLogPanel v-if="activeLog === 'error-log'" :show-system-logs="showSystemLogs" @copy="copy" @notify="notify" />
+              <ApiAccessLogPanel v-else @copy="copy" @notify="notify" />
+            </template>
+            <template #api="{ config: settingsConfig, localIp: settingsLocalIp }">
+              <ApiTab
+                :config="settingsConfig"
+                :local-ip="settingsLocalIp"
+                @config="setConfig"
+                @notify="notify"
+                @copy="copy"
+              />
+            </template>
+            <template #remotes>
+              <RemotesPanel @notify="notify" @printers-changed="refreshPrinters" />
+            </template>
+          </SettingsView>
+        </main>
+        <main v-else-if="configError" key="config-error-page">
+          <EmptyState :icon="MonitorX" tone="warn" title="Settings could not be loaded" :text="configError">
+            <button class="primary small" @click="openDiagnostics">Open Diagnostics</button>
+            <button class="ghost small" @click="reload">Try again</button>
+          </EmptyState>
+        </main>
+        <main v-else-if="!config" key="loading-page">
+          <p class="muted center-text">Loading…</p>
+        </main>
+        <main v-else :key="printPageOpen ? 'test-print-page' : `tab-${tab}`">
+          <PrintTab
+            v-if="printPageOpen"
+            :config="config"
+            :printers="printers"
+            :printers-loaded="printersLoaded"
+            :selected-printer="selectedPrinter"
+            :test-pages="testPages"
+            :requested-preset="requestedPreset"
+            :return-label="tabLabel"
+            @back="closePrintPage"
+            @presets="selectTab('presets')"
+            @printers="selectTab('printers')"
+            @select-printer="selectedPrinter = $event"
+            @test-pages="setTestPages"
           />
-        </template>
-        <template #remotes>
-          <RemotesPanel @notify="notify" @printers-changed="refreshPrinters" />
-        </template>
-      </SettingsView>
-      <PrintTab
-        v-else-if="printPageOpen"
-        :config="config"
-        :printers="printers"
-        :printers-loaded="printersLoaded"
-        :selected-printer="selectedPrinter"
-        :test-pages="testPages"
-        :requested-preset="requestedPreset"
-        :return-label="tabLabel"
-        @back="closePrintPage"
-        @presets="selectTab('presets')"
-        @printers="selectTab('printers')"
-        @select-printer="selectedPrinter = $event"
-        @test-pages="setTestPages"
-      />
-      <PrintersTab
-        v-else-if="tab === 'printers'"
-        :printers="printers"
-        :config="config"
-        :selected="selectedPrinter"
-        :refreshing="refreshing"
-        :loaded="printersLoaded"
-        :os="os"
-        @refresh="refreshPrinters(true)"
-        @reload="refreshPrinters()"
-        @select="selectedPrinter = $event"
-        @toggle-default="toggleDefaultPrinter"
-        @copy="copy"
-        @notify="notify"
-        @config="setConfig"
-      />
-      <PresetsTab
-        v-else-if="tab === 'presets'"
-        :config="config"
-        :printers="printers"
-        :test-pages="testPages"
-        :local-ip="bridgeHost"
-        :server-port="config.server_port"
-        @config="setConfig"
-        @notify="notify"
-        @open-print="openPrintPage"
-      >
-        <template #design-editor="{ presetName, template, localIp: editorLocalIp, serverPort, apply, cancel }">
-          <DesignEditor
-            :preset-name="presetName"
-            :template="template"
-            :local-ip="editorLocalIp"
-            :server-port="serverPort"
-            @apply="apply"
-            @cancel="cancel"
+          <PrintersTab
+            v-else-if="tab === 'printers'"
+            :printers="printers"
+            :config="config"
+            :selected="selectedPrinter"
+            :refreshing="refreshing"
+            :loaded="printersLoaded"
+            :os="os"
+            @refresh="refreshPrinters(true)"
+            @reload="refreshPrinters()"
+            @select="selectedPrinter = $event"
+            @toggle-default="toggleDefaultPrinter"
+            @copy="copy"
+            @notify="notify"
+            @config="setConfig"
           />
-        </template>
-      </PresetsTab>
-      <HistoryTab v-else :config="config" @config="setConfig" @notify="notify" />
-    </main>
+          <PresetsTab
+            v-else-if="tab === 'presets'"
+            :config="config"
+            :printers="printers"
+            :test-pages="testPages"
+            :local-ip="bridgeHost"
+            :server-port="config.server_port"
+            @config="setConfig"
+            @notify="notify"
+            @open-print="openPrintPage"
+          >
+            <template #design-editor="{ presetName, template, localIp: editorLocalIp, serverPort, apply, cancel }">
+              <DesignEditor
+                :preset-name="presetName"
+                :template="template"
+                :local-ip="editorLocalIp"
+                :server-port="serverPort"
+                @apply="apply"
+                @cancel="cancel"
+              />
+            </template>
+          </PresetsTab>
+          <HistoryTab v-else :config="config" @config="setConfig" @notify="notify" />
+        </main>
+      </Transition>
+    </div>
 
     <footer class="colophon">
       <span>{{ PRODUCT }}{{ version ? ` ${version}` : "" }}{{ osLabel ? ` · ${osLabel}` : "" }}</span>

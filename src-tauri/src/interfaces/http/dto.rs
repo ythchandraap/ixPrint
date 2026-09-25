@@ -69,7 +69,7 @@ pub(super) struct LegacyTemplatePrint {
 
 pub(super) const MAX_JSON_BYTES: usize = 5 * 1024 * 1024;
 /// Records per JSON print; each becomes at least one rendered label or row.
-pub(super) const MAX_RECORDS: usize = 10_000;
+pub(super) const MAX_RECORDS: usize = crate::domain::template::MAX_RECORDS;
 
 pub(super) struct DataSubmission {
     pub(super) preset: Option<String>,

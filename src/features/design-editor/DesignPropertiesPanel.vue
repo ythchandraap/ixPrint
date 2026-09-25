@@ -9,6 +9,7 @@ const emit = defineEmits<{
   "replace-image": [index: number | null];
   duplicate: [];
   remove: [];
+  align: [edge: "left" | "hcenter" | "right" | "top" | "vcenter" | "bottom"];
 }>();
 const newField = ref("");
 const alignOptions = [
@@ -160,10 +161,18 @@ function useImageField(element: TemplateElement, field: string) {
       <button type="button" class="ghost small" @click="addField">+</button>
     </div>
 
+    <div class="row wrap align-tools" aria-label="Align item to page">
+      <span class="meta">Align to page:</span>
+      <button v-for="item in [
+        { value: 'left', label: 'Left' }, { value: 'hcenter', label: 'Centre X' }, { value: 'right', label: 'Right' },
+        { value: 'top', label: 'Top' }, { value: 'vcenter', label: 'Centre Y' }, { value: 'bottom', label: 'Bottom' },
+      ] as const" :key="item.value" type="button" class="ghost small" @click="emit('align', item.value)">{{ item.label }}</button>
+    </div>
+
     <div class="row wrap">
-      <button type="button" class="icon" title="Duplicate" @click="emit('duplicate')"><Copy :size="16" /></button>
+      <button type="button" class="icon" title="Duplicate" aria-label="Duplicate selected element" @click="emit('duplicate')"><Copy :size="16" /></button>
       <span class="grow"></span>
-      <button type="button" class="icon danger" title="Remove element" @click="emit('remove')">
+      <button type="button" class="icon danger" title="Remove element" aria-label="Remove selected element" @click="emit('remove')">
         <Trash2 :size="16" />
       </button>
     </div>

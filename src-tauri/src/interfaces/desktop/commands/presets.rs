@@ -1,6 +1,7 @@
 use super::super::blocking;
 use super::super::AppStateRef;
 use crate::domain::preset::{ImportOptions, ImportPreview, Preset, PresetBundle};
+use crate::domain::remote::SharedPresetListing;
 use crate::domain::settings_config::Config;
 #[tauri::command]
 pub fn get_config(state: AppStateRef<'_>) -> Config {
@@ -17,6 +18,57 @@ pub fn set_default_preset(state: AppStateRef<'_>, name: Option<String>) -> Resul
     crate::application::preset_service::set_default_preset(&state, name)
 }
 
+#[tauri::command]
+pub fn set_preset_shared(state: AppStateRef<'_>, name: String, shared: bool) -> Result<Config, String> {
+    crate::application::preset_service::set_shared(&state, name, shared)
+}
+
+#[tauri::command]
+pub fn set_preset_list_endpoint_enabled(state: AppStateRef<'_>, enabled: bool) -> Result<Config, String> {
+    crate::application::preset_service::set_preset_list_endpoint_enabled(&state, enabled)
+}
+
+#[tauri::command]
+pub async fn get_remote_shared_presets(
+    state: AppStateRef<'_>,
+    remote_id: String,
+) -> Result<SharedPresetListing, String> {
+    let state = state.inner().clone();
+    blocking(move || crate::application::preset_service::shared_presets(&state, &remote_id)).await?
+}
+
+#[tauri::command]
+pub async fn preview_remote_preset_import(
+    state: AppStateRef<'_>,
+    remote_id: String,
+    name: String,
+) -> Result<ImportPreview, String> {
+    let state = state.inner().clone();
+    blocking(move || crate::application::preset_service::preview_remote_import(&state, &remote_id, &name)).await?
+}
+
+#[tauri::command]
+pub async fn apply_remote_preset_import(
+    state: AppStateRef<'_>,
+    remote_id: String,
+    name: String,
+    expected_sha256: String,
+    options: ImportOptions,
+) -> Result<ImportOutcome, String> {
+    let state = state.inner().clone();
+    blocking(move || {
+        let (config, imported) = crate::application::preset_service::apply_remote_import(
+            &state,
+            &remote_id,
+            &name,
+            &expected_sha256,
+            &options,
+        )?;
+        Ok(ImportOutcome { config, imported })
+    })
+    .await?
+}
+
 /// Creates or updates a preset (settings + optional design); `original_name` renames it.
 #[tauri::command]
 pub fn save_preset(
@@ -26,6 +78,54 @@ pub fn save_preset(
     preset: Preset,
 ) -> Result<Config, String> {
     crate::application::preset_service::save(&state, name, original_name, preset)
+}
+
+#[tauri::command]
+pub fn save_preset_draft(state: AppStateRef<'_>, name: String, preset: Preset) -> Result<Config, String> {
+    crate::application::preset_service::save_draft(&state, name, preset)
+}
+
+#[tauri::command]
+pub fn publish_preset_draft(state: AppStateRef<'_>, name: String) -> Result<Config, String> {
+    crate::application::preset_service::publish_draft(&state, &name)
+}
+
+#[tauri::command]
+pub fn discard_preset_draft(state: AppStateRef<'_>, name: String) -> Result<Config, String> {
+    crate::application::preset_service::discard_draft(&state, &name)
+}
+
+#[tauri::command]
+pub fn restore_preset_previous(state: AppStateRef<'_>, name: String) -> Result<Config, String> {
+    crate::application::preset_service::restore_previous(&state, &name)
+}
+
+#[tauri::command]
+pub async fn test_preset_draft(state: AppStateRef<'_>, name: String) -> Result<crate::domain::job::JobResult, String> {
+    let state = state.inner().clone();
+    blocking(move || {
+        let draft = state
+            .config
+            .get()
+            .preset_drafts
+            .get(&name)
+            .cloned()
+            .ok_or("No draft for this preset")?;
+        let request = crate::domain::job::JobRequest {
+            job_id: None,
+            document: crate::domain::job::Document::TestPage { pages: 1 },
+            file_name: format!("Draft test: {}", name),
+            settings: Default::default(),
+            preset: Some(name),
+            source: "app",
+            client: None,
+            token: None,
+            hop: false,
+        };
+        crate::application::job_service::run_with_preset(&state, request, Some(draft))
+            .map_err(|error| error.message().to_string())
+    })
+    .await?
 }
 
 /// Print preview: the design filled with its sample data `rows` times; returns
@@ -39,6 +139,21 @@ pub async fn preview_print(
 ) -> Result<(Vec<String>, usize), String> {
     let state = state.inner().clone();
     blocking(move || crate::application::preset_service::preview_print(&state, &template, rows, px_per_mm)).await?
+}
+
+#[tauri::command]
+pub async fn preview_print_data(
+    state: AppStateRef<'_>,
+    template: crate::domain::template::Template,
+    records: Vec<crate::domain::template::Record>,
+    header: crate::domain::template::Record,
+    px_per_mm: Option<f32>,
+) -> Result<(Vec<String>, usize), String> {
+    let state = state.inner().clone();
+    blocking(move || {
+        crate::application::preset_service::preview_print_data(&state, &template, &records, &header, px_per_mm)
+    })
+    .await?
 }
 
 /// PNG data URL of a design filled with `data`, rendered exactly as it prints.

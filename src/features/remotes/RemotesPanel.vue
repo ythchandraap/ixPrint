@@ -100,16 +100,16 @@ onMounted(load);
 
 <template>
   <section class="stack">
-    <p class="hint">Create an API token on that computer first (Settings → API), then paste it here.</p>
+    <p class="hint">Create an API token on that computer first (Settings → API access &amp; security), then paste it here.</p>
     <p v-if="loading" class="muted">Loading remote computers…</p>
     <div v-for="remote in remotes" :key="remote.id" class="card stack tight">
       <div class="row">
         <strong class="grow truncate">{{ remote.name }}</strong>
-        <button class="icon" title="Test connection" :disabled="testing === remote.id" @click="test(remote)">
+        <button class="icon" title="Test connection" :aria-label="`Test connection to ${remote.name}`" :disabled="testing === remote.id" @click="test(remote)">
           <RefreshCw :size="16" :class="{ spin: testing === remote.id }" />
         </button>
-        <button class="icon" title="Edit remote computer" @click="edit(remote)"><Pencil :size="16" /></button>
-        <button class="icon danger" title="Remove remote computer" @click="remove(remote)">
+        <button class="icon" title="Edit remote computer" :aria-label="`Edit ${remote.name}`" @click="edit(remote)"><Pencil :size="16" /></button>
+        <button class="icon danger" title="Remove remote computer" :aria-label="`Remove ${remote.name}`" @click="remove(remote)">
           <Trash2 :size="16" />
         </button>
       </div>
@@ -127,7 +127,7 @@ onMounted(load);
     <form class="card stack" @submit.prevent="submit">
       <div class="row">
         <strong class="grow">{{ editing ? "Edit remote computer" : "Add remote computer" }}</strong>
-        <button v-if="editing" type="button" class="icon" title="Cancel" @click="reset"><X :size="16" /></button>
+        <button v-if="editing" type="button" class="icon" title="Cancel" aria-label="Cancel editing remote computer" @click="reset"><X :size="16" /></button>
       </div>
       <label class="field"
         ><span>Name</span><input v-model="name" required maxlength="32" placeholder="e.g. PC2 or Warehouse"

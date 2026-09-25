@@ -1,14 +1,15 @@
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { api, errorText, isInApp, type Config, type PrinterView } from "@/shared/api";
+import { appearance, setAppearance, type Appearance } from "./appearance";
 import { usePolling } from "./usePolling";
 
 export function useAppShell() {
   /** Product name, in one place so a rename touches a single line. */
   const PRODUCT = "ix.print";
   /** Parent brand; the product remains the primary task identifier. */
-  const BRAND = "itz.ixxyyzz";
+  const BRAND = ".ixxyyss";
   const DEFAULT_PORT = 18032;
   const ONBOARDING_KEY = "ixprint.onboarding.v1";
 
@@ -33,7 +34,22 @@ export function useAppShell() {
   const requestedPreset = ref("");
   const tabLabel = computed(() => ({ printers: "Printers", presets: "Presets", history: "History" })[tab.value]);
   /** Settings (API tokens, API docs) replace the tabs while open. */
+  const navigationStarted = ref(false);
   const settingsOpen = ref(false);
+  type SettingsMenu = "appearance" | "integration" | "api-access" | "remote-printers" | "local-data" | "diagnostics";
+  const settingsMenu = ref<SettingsMenu | null>(null);
+  const diagnosticsLog = ref<"error-log" | "api-access-log">("error-log");
+  const settingsTitle = computed(() => {
+    if (!settingsMenu.value) return "Settings";
+    return {
+      appearance: "Appearance",
+      integration: "Integration & connection",
+      "api-access": "API access & security",
+      "remote-printers": "Remote printers",
+      "local-data": "Local data",
+      diagnostics: "Diagnostics",
+    }[settingsMenu.value];
+  });
   const onboardingOpen = ref(false);
   const toast = ref<{ text: string; error: boolean } | null>(null);
   let toastTimer: number | undefined;
@@ -45,6 +61,12 @@ export function useAppShell() {
     clearTimeout(toastTimer);
     toastTimer = window.setTimeout(() => (toast.value = null), error ? 6000 : 3000);
     if (error && inApp) void api.recordError("ui-notification", text).catch(() => {});
+  }
+
+  function changeAppearance(next: Appearance) {
+    if (!setAppearance(next)) {
+      notify("Appearance changed for this session, but could not be saved on this computer.", true);
+    }
   }
 
   function needsOnboarding() {
@@ -155,25 +177,53 @@ export function useAppShell() {
   }
 
   function openPrintPage(preset = "") {
+    navigationStarted.value = true;
     requestedPreset.value = preset;
     settingsOpen.value = false;
+    settingsMenu.value = null;
     printPageOpen.value = true;
   }
 
   function toggleSettings() {
+    navigationStarted.value = true;
+    settingsOpen.value = !settingsOpen.value;
+    settingsMenu.value = null;
     if (settingsOpen.value) {
-      settingsOpen.value = false;
-    } else {
-      settingsOpen.value = true;
       printPageOpen.value = false;
     }
   }
 
+  function selectSettingsMenu(menu: SettingsMenu | null) {
+    navigationStarted.value = true;
+    settingsMenu.value = menu;
+    if (menu === "diagnostics") diagnosticsLog.value = "error-log";
+  }
+
+  function selectDiagnosticsLog(log: "error-log" | "api-access-log") {
+    diagnosticsLog.value = log;
+  }
+
+  function backFromSettings() {
+    navigationStarted.value = true;
+    if (settingsMenu.value) settingsMenu.value = null;
+    else settingsOpen.value = false;
+  }
+
+  function openDiagnostics() {
+    navigationStarted.value = true;
+    settingsOpen.value = true;
+    settingsMenu.value = "diagnostics";
+    diagnosticsLog.value = "error-log";
+    printPageOpen.value = false;
+  }
+
   function closePrintPage() {
+    navigationStarted.value = true;
     printPageOpen.value = false;
   }
 
   function selectTab(name: "printers" | "presets" | "history") {
+    navigationStarted.value = true;
     printPageOpen.value = false;
     tab.value = name;
   }
@@ -237,11 +287,11 @@ export function useAppShell() {
     onboardingOpen.value = needsOnboarding();
     unlistenTray = await listen<string>("tray-navigate", (event) => {
       if (event.payload === "errors") {
-        settingsOpen.value = true;
-        printPageOpen.value = false;
-        nextTick(() => document.getElementById("error-logs")?.scrollIntoView({ block: "start", behavior: "smooth" }));
+        openDiagnostics();
       } else {
+        navigationStarted.value = true;
         settingsOpen.value = false;
+        settingsMenu.value = null;
         printPageOpen.value = false;
         tab.value = event.payload === "history" ? "history" : "printers";
       }
@@ -304,12 +354,18 @@ export function useAppShell() {
     printPageOpen,
     requestedPreset,
     tabLabel,
+    navigationStarted,
     settingsOpen,
+    settingsMenu,
+    diagnosticsLog,
+    settingsTitle,
+    appearance,
     onboardingOpen,
     toast,
     refreshing,
     printersLoaded,
     notify,
+    changeAppearance,
     completeOnboarding,
     refreshPrinters,
     openDocs,
@@ -322,6 +378,10 @@ export function useAppShell() {
     setTestPages,
     openPrintPage,
     toggleSettings,
+    selectSettingsMenu,
+    selectDiagnosticsLog,
+    backFromSettings,
+    openDiagnostics,
     closePrintPage,
     selectTab,
     reload,

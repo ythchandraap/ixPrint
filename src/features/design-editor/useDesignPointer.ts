@@ -1,8 +1,12 @@
 import { onBeforeUnmount, type ComputedRef, type Ref } from "vue";
 import type { TemplateElement } from "@/shared/api";
 
+export type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
+export type PointerAction = "move" | "end1" | "end2" | ResizeHandle;
+
 type Drag =
-  | { kind: "move" | "resize"; index: number; startX: number; startY: number; origin: TemplateElement }
+  | { kind: "move"; index: number; startX: number; startY: number; origin: TemplateElement }
+  | { kind: "resize"; handle: ResizeHandle; index: number; startX: number; startY: number; origin: TemplateElement }
   | { kind: "end"; index: number; end: 1 | 2; startX: number; startY: number; origin: TemplateElement };
 const snap = (value: number) => Math.round(value / 0.5) * 0.5;
 const clone = (element: TemplateElement) => JSON.parse(JSON.stringify(element)) as TemplateElement;
@@ -11,6 +15,7 @@ export function useDesignPointer(
   elements: TemplateElement[],
   selected: Ref<number | null>,
   scale: ComputedRef<number>,
+  snapEnabled: Ref<boolean>,
 ) {
   let drag: Drag | null = null;
 
@@ -31,14 +36,15 @@ export function useDesignPointer(
   }
 
   function moveBy(element: TemplateElement, dx: number, dy: number) {
+    const position = (value: number) => snapEnabled.value ? snap(value) : Math.round(value * 100) / 100;
     if (element.type === "line") {
-      element.x1 = snap(element.x1 + dx);
-      element.x2 = snap(element.x2 + dx);
-      element.y1 = snap(element.y1 + dy);
-      element.y2 = snap(element.y2 + dy);
+      element.x1 = position(element.x1 + dx);
+      element.x2 = position(element.x2 + dx);
+      element.y1 = position(element.y1 + dy);
+      element.y2 = position(element.y2 + dy);
     } else {
-      element.x = snap(element.x + dx);
-      element.y = snap(element.y + dy);
+      element.x = position(element.x + dx);
+      element.y = position(element.y + dy);
     }
   }
 
@@ -52,14 +58,24 @@ export function useDesignPointer(
       Object.assign(element, clone(origin));
       moveBy(element, dx, dy);
     } else if (drag.kind === "end" && element.type === "line" && origin.type === "line") {
-      if (drag.end === 1) [element.x1, element.y1] = [snap(origin.x1 + dx), snap(origin.y1 + dy)];
-      else [element.x2, element.y2] = [snap(origin.x2 + dx), snap(origin.y2 + dy)];
+      const position = (value: number) => snapEnabled.value ? snap(value) : Math.round(value * 100) / 100;
+      if (drag.end === 1) [element.x1, element.y1] = [position(origin.x1 + dx), position(origin.y1 + dy)];
+      else [element.x2, element.y2] = [position(origin.x2 + dx), position(origin.y2 + dy)];
     } else if (drag.kind === "resize") {
+      const position = (value: number) => snapEnabled.value ? snap(value) : Math.round(value * 100) / 100;
       if (element.type === "qr" && origin.type === "qr")
-        element.size = Math.max(2, snap(origin.size + Math.max(dx, dy)));
+        element.size = Math.max(2, position(origin.size + Math.max(dx, dy)));
       else if (element.type !== "line" && element.type !== "qr" && origin.type !== "line" && origin.type !== "qr") {
-        element.w = Math.max(1, snap(origin.w + dx));
-        element.h = Math.max(1, snap(origin.h + dy));
+        const right = origin.x + origin.w;
+        const bottom = origin.y + origin.h;
+        const left = drag.handle.includes("w") ? Math.min(position(origin.x + dx), right - 1) : origin.x;
+        const top = drag.handle.includes("n") ? Math.min(position(origin.y + dy), bottom - 1) : origin.y;
+        const resizedRight = drag.handle.includes("e") ? Math.max(position(right + dx), origin.x + 1) : right;
+        const resizedBottom = drag.handle.includes("s") ? Math.max(position(bottom + dy), origin.y + 1) : bottom;
+        element.x = left;
+        element.y = top;
+        element.w = Math.round((resizedRight - left) * 100) / 100;
+        element.h = Math.round((resizedBottom - top) * 100) / 100;
       }
     }
   }
@@ -67,18 +83,23 @@ export function useDesignPointer(
   function endDrag() {
     drag = null;
     window.removeEventListener("pointermove", onDrag);
+    window.removeEventListener("pointerup", endDrag);
+    window.removeEventListener("pointercancel", endDrag);
   }
 
-  function startDrag(event: PointerEvent, index: number, kind: "move" | "resize" | "end1" | "end2") {
+  function startDrag(event: PointerEvent, index: number, kind: PointerAction) {
     event.preventDefault();
     event.stopPropagation();
+    (event.currentTarget as HTMLElement).closest<HTMLElement>(".stage")?.focus();
     selected.value = index;
     const origin = clone(elements[index]);
     const base = { index, startX: event.clientX, startY: event.clientY, origin };
-    drag =
-      kind === "end1" || kind === "end2" ? { kind: "end", end: kind === "end1" ? 1 : 2, ...base } : { kind, ...base };
+    drag = kind === "end1" || kind === "end2"
+      ? { kind: "end", end: kind === "end1" ? 1 : 2, ...base }
+      : kind === "move" ? { kind: "move", ...base } : { kind: "resize", handle: kind, ...base };
     window.addEventListener("pointermove", onDrag);
-    window.addEventListener("pointerup", endDrag, { once: true });
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
   }
 
   onBeforeUnmount(endDrag);

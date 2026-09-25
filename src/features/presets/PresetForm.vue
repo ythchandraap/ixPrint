@@ -23,7 +23,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: "saved", config: Config): void;
+  (e: "saved", config: Config, draft: boolean): void;
   (e: "cancel"): void;
 }>();
 
@@ -270,9 +270,36 @@ function resetPaperLayoutFields() {
 }
 
 /** Starter design, sized from the preset's custom paper when there is one. */
+type StarterDesign = "product" | "receipt" | "blank";
+const starterDesign = ref<StarterDesign>("product");
+const smallCustomPaper = computed(() => form.paperMode === "custom" &&
+  ((num(form.customW) ?? 60) < 30 || (num(form.customH) ?? 40) < 30));
+function startDesign(kind: StarterDesign) {
+  starterDesign.value = kind;
+  editingDesign.value = true;
+}
 function newDesign(): Template {
+  if (starterDesign.value === "receipt") {
+    return {
+      width_mm: 80, height_mm: 120,
+      layout: { mode: "list", header_mm: 24, row_mm: 12, footer_mm: 10, footer: "last_page", roll: true },
+      elements: [
+        { type: "text", id: "shop", x: 3, y: 2, w: 74, h: 8, text: "{{toko}}", size: 14, bold: true, align: "center", valign: "top", wrap: true, fit: true },
+        { type: "text", id: "date", x: 3, y: 13, w: 74, h: 6, text: "{{tanggal}}", size: 9, bold: false, align: "center", valign: "top", wrap: true, fit: true },
+        { type: "text", id: "item", x: 3, y: 25, w: 50, h: 8, text: "{{nama}}", size: 10, bold: false, align: "left", valign: "top", wrap: true, fit: true },
+        { type: "text", id: "price", x: 54, y: 25, w: 23, h: 8, text: "{{harga}}", size: 10, bold: false, align: "right", valign: "top", wrap: true, fit: true },
+        { type: "line", id: "divider", x1: 3, y1: 38, x2: 77, y2: 38, width: 0.5 },
+        { type: "text", id: "total", x: 3, y: 40, w: 74, h: 6, text: "Total: {{total}}", size: 11, bold: true, align: "right", valign: "top", wrap: true, fit: true },
+      ],
+      sample: { toko: "My Shop", tanggal: new Date().toLocaleDateString("id-ID"), nama: "Product A", harga: "10,000", total: "10,000" },
+      required_fields: ["nama", "harga"],
+    };
+  }
   const w = form.paperMode === "custom" ? (num(form.customW) ?? 60) : 60;
   const h = form.paperMode === "custom" ? (num(form.customH) ?? 40) : 40;
+  if (starterDesign.value === "blank" || w < 30 || h < 30) {
+    return { width_mm: w, height_mm: h, elements: [], sample: {} };
+  }
   return {
     width_mm: w,
     height_mm: h,
@@ -319,6 +346,7 @@ function newDesign(): Template {
       },
     ],
     sample: { nama: "Product A", kode: "SKU-001" },
+    required_fields: ["nama", "kode"],
   };
 }
 
@@ -338,8 +366,11 @@ async function save() {
   saving.value = true;
   try {
     const preset: Preset = { ...toSettings(), ...(design.value ? { design: design.value } : {}) };
-    const config = await api.savePreset(form.name.trim(), preset, props.name);
-    emit("saved", config);
+    const draft = Boolean(props.name);
+    const config = draft
+      ? await api.savePresetDraft(props.name!, preset)
+      : await api.savePreset(form.name.trim(), preset);
+    emit("saved", config, draft);
   } catch (e) {
     error.value = errorText(e);
   } finally {
@@ -349,6 +380,7 @@ async function save() {
 </script>
 
 <template>
+  <Transition name="detail" mode="out-in">
   <slot
     v-if="editingDesign"
     name="design-editor"
@@ -365,7 +397,7 @@ async function save() {
 
     <label class="field">
       <span>Preset name</span>
-      <input v-model="form.name" required maxlength="64" placeholder="e.g. receipt" />
+      <input v-model="form.name" :readonly="Boolean(name)" required maxlength="64" placeholder="e.g. receipt" />
     </label>
 
     <fieldset>
@@ -393,8 +425,11 @@ async function save() {
           >), the web app only needs to send the data.
         </p>
         <div class="row">
-          <button type="button" class="ghost small" @click="editingDesign = true">+ Create design</button>
+          <button type="button" class="ghost small" :disabled="smallCustomPaper" @click="startDesign('product')">Product label</button>
+          <button type="button" class="ghost small" @click="startDesign('receipt')">80 mm receipt list</button>
+          <button type="button" class="ghost small" @click="startDesign('blank')">Blank canvas</button>
         </div>
+        <p v-if="smallCustomPaper" class="hint">Product label needs at least 30 × 30 mm; use a blank canvas for smaller paper.</p>
       </template>
     </fieldset>
 
@@ -564,9 +599,10 @@ async function save() {
     <p v-if="error" class="error">{{ error }}</p>
     <div class="row end">
       <button type="button" class="ghost" @click="emit('cancel')">Cancel</button>
-      <button type="submit" class="primary" :disabled="saving">{{ saving ? "Saving…" : "Save" }}</button>
+      <button type="submit" class="primary" :disabled="saving">{{ saving ? "Saving…" : name ? "Save draft" : "Create preset" }}</button>
     </div>
   </form>
+  </Transition>
 </template>
 
 <style scoped>

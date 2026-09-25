@@ -4,13 +4,14 @@ use std::pin::Pin;
 
 use serde_json::Value;
 
+use crate::domain::api_access::ApiAccessEntry;
 use crate::domain::callback::{Attempt, Callback, Payload};
 use crate::domain::diagnostics::DiagnosticEntry;
 use crate::domain::history::{CallbackStatus, HistoryDay, HistoryEntry, HistoryPage};
 use crate::domain::layout::{LayoutResult, Sheet};
 use crate::domain::printer::{Capabilities, DeviceOptions, JobStatus, Printer, PrinterQueue};
 use crate::domain::printer_admin::{Device, Driver, NewPrinter, PrinterDetails, PrinterEdit};
-use crate::domain::remote::{Remote, RemoteError, RemotePrintResult};
+use crate::domain::remote::{Remote, RemoteError, RemotePrintResult, SharedPresetListing};
 use crate::domain::settings::{JobSettings, PrintSettings};
 use crate::domain::settings_config::Config;
 use crate::domain::template::{Record, Template};
@@ -20,6 +21,18 @@ pub trait ConfigRepository: Send + Sync {
     /// Applies the mutator once to a copy, validates it, then commits the result.
     fn update(&self, change: &mut dyn FnMut(&mut Config) -> Result<(), String>) -> Result<Config, String>;
     fn data_dir(&self) -> PathBuf;
+}
+
+pub enum Reservation {
+    New,
+    Existing(String),
+    Pending,
+    Conflict,
+}
+
+pub trait IdempotencyRepository: Send + Sync {
+    /// Atomically reserve a key before the spooler is contacted.
+    fn reserve(&self, key_hash: &str, fingerprint: &str, job_id: &str) -> Result<Reservation, String>;
 }
 
 pub trait RemoteRepository: Send + Sync {
@@ -32,6 +45,7 @@ pub trait HistoryRepository: Send + Sync {
     fn append_callback(&self, job_id: &str, status: CallbackStatus) -> Result<(), String>;
     fn find(&self, job_id: &str) -> Option<HistoryEntry>;
     fn read_page(&self, date: &str, page: usize, per_page: usize, failed_only: bool) -> Result<HistoryPage, String>;
+    fn search(&self, query: &str, page: usize, per_page: usize) -> Result<HistoryPage, String>;
     fn days(&self) -> Vec<HistoryDay>;
     fn prune(&self, retention_days: u32);
 }
@@ -44,6 +58,12 @@ pub trait DiagnosticsRepository: Send + Sync {
     fn read(&self) -> Result<Vec<DiagnosticEntry>, String>;
     fn clear(&self) -> Result<(), String>;
     fn finish_session(&self);
+}
+
+pub trait ApiAccessLogRepository: Send + Sync {
+    fn append(&self, entry: &ApiAccessEntry) -> Result<(), String>;
+    fn read(&self) -> Result<Vec<ApiAccessEntry>, String>;
+    fn clear(&self) -> Result<(), String>;
 }
 
 pub trait PrinterGateway: Send + Sync {
@@ -60,6 +80,9 @@ pub trait PrinterGateway: Send + Sync {
     ) -> Result<Option<String>, String>;
     fn queue(&self, printer: &str) -> Result<PrinterQueue, String>;
     fn job_status(&self, printer: &str, spooler_job: &str) -> Result<JobStatus, String>;
+    fn cancel(&self, _printer: &str, _spooler_job: &str) -> Result<(), String> {
+        Err("Queue cancellation is unavailable on this printer adapter".into())
+    }
 }
 
 pub trait PrinterAdmin: Send + Sync {
@@ -103,6 +126,8 @@ pub trait PdfEngine: Send + Sync {
 }
 
 pub trait RemoteGateway: Send + Sync {
+    fn shared_presets(&self, remote: &Remote) -> Result<SharedPresetListing, RemoteError>;
+    fn fetch_shared_preset(&self, remote: &Remote, name: &str) -> Result<Vec<u8>, RemoteError>;
     fn fetch_printers(&self, remote: &Remote) -> Result<Vec<Printer>, RemoteError>;
     fn capabilities(&self, remote: &Remote, name: &str) -> Result<Capabilities, RemoteError>;
     fn queue(&self, remote: &Remote, name: &str) -> Result<PrinterQueue, RemoteError>;

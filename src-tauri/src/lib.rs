@@ -9,7 +9,11 @@ use infrastructure::net::{callback_client::CallbackClient, remote_client::Remote
 use infrastructure::os::SystemClock;
 use infrastructure::pdf::PdfEngineAdapter;
 use infrastructure::persistence::{
-    config_store::ConfigStore, diagnostics_store::Diagnostics, history_store::History, remote_store::RemoteStore,
+    api_access_log::ApiAccessLog,
+    config_store::ConfigStore,
+    diagnostics_store::Diagnostics,
+    history_store::History,
+    idempotency_store::IdempotencyStore, remote_store::RemoteStore,
 };
 use infrastructure::printing::{admin::LocalPrinterAdmin, LocalPrinterGateway};
 use std::path::PathBuf;
@@ -47,7 +51,7 @@ pub fn run() {
             .plugin(tauri_plugin_dialog::init())
             .setup(|app| {
                 let data_dir = app.path().app_data_dir()?;
-                // Config (token hashes, presets), history and print jobs: owner only.
+                // Config, print history, API access logs and temporary jobs: owner only.
                 std::fs::create_dir_all(&data_dir)?;
                 #[cfg(unix)]
                 {
@@ -71,6 +75,8 @@ pub fn run() {
                 let remotes = RemoteStore::load(&data_dir);
                 let history = History::new(data_dir.join("history"));
                 history.prune(config.get().history_retention_days);
+                let idempotency = IdempotencyStore::new(data_dir.join("idempotency"));
+                idempotency.prune();
 
                 let state = Arc::new(AppState {
                     config: Arc::new(config),
@@ -82,7 +88,9 @@ pub fn run() {
                     in_flight: Default::default(),
                     failed_auth: Default::default(),
                     history: Arc::new(history),
+                    idempotency: Arc::new(idempotency),
                     diagnostics: Arc::new(diagnostics),
+                    api_access_log: Arc::new(ApiAccessLog::new(&data_dir)),
                     printer_gateway: Arc::new(LocalPrinterGateway),
                     printer_admin: Arc::new(LocalPrinterAdmin),
                     pdf_engine: Arc::new(PdfEngineAdapter),
@@ -92,6 +100,9 @@ pub fn run() {
                     jobs_dir,
                 });
                 app.manage(state.clone());
+
+                let callback_state = state.clone();
+                std::thread::spawn(move || application::callback_service::resume_pending(callback_state));
 
                 if state.config.get().bridge_enabled {
                     interfaces::http::spawn(state.clone());

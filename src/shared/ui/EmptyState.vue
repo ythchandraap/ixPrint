@@ -26,23 +26,20 @@ defineProps<{
   align-items: center;
   text-align: center;
   gap: 6px;
-  padding: 24px 16px;
+  padding: 16px 12px;
   border: 1px dashed var(--line);
   border-radius: var(--r-lg);
   background: var(--surface);
 }
 .empty-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
   display: grid;
   place-items: center;
-  background: var(--brand-pale);
   color: var(--brand);
-  margin-bottom: 2px;
 }
 .warn .empty-icon {
-  background: var(--danger-soft);
   color: var(--danger);
 }
 .empty .hint {

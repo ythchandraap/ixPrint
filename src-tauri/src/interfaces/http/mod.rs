@@ -1,4 +1,5 @@
 pub mod auth_guard;
+mod api_access;
 pub mod cors;
 pub mod dto;
 pub mod handlers;
@@ -24,7 +25,13 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
         .route("/job-status", web::get().to(handlers::jobs::job_status))
         .route("/presets", web::get().to(handlers::presets::presets))
         .route("/presets/export", web::get().to(handlers::presets::export_presets))
+        .route("/presets/shared", web::get().to(handlers::presets::shared_presets))
+        .route(
+            "/presets/shared/export",
+            web::get().to(handlers::presets::export_shared_preset),
+        )
         .route("/print", web::post().to(handlers::jobs::print))
+        .route("/preflight", web::post().to(handlers::jobs::preflight))
         .route("/test-page", web::post().to(handlers::jobs::test_page))
         .route("/templates", web::get().to(handlers::presets::templates))
         .route("/print-template", web::post().to(handlers::jobs::print_template));
@@ -88,6 +95,52 @@ async fn run_server(state: Arc<AppState>, runtime: Arc<ServerRuntime>) -> std::i
             .wrap(cors::cors(cors_state.clone()))
             .app_data(data.clone())
             .configure(routes)
+            .wrap_fn(|req, srv| {
+                use actix_web::dev::Service;
+
+                let state = req
+                    .app_data::<web::Data<Arc<AppState>>>()
+                    .map(|data| data.get_ref().clone());
+                let mut access = state
+                    .as_ref()
+                    .map(|state| api_access::request_entry(&req, state));
+                let future = srv.call(req);
+                async move {
+                    match future.await {
+                        Ok(response) => {
+                            if let (Some(state), Some((mut entry, started))) = (state, access.take()) {
+                                api_access::response_entry(
+                                    &mut entry,
+                                    response.status(),
+                                    response.response().headers(),
+                                    started,
+                                );
+                                let log = state.api_access_log.clone();
+                                actix_web::rt::task::spawn_blocking(move || {
+                                    if let Err(error) = log.append(&entry) {
+                                        eprintln!("[ix.print] failed to write API access log: {}", error);
+                                    }
+                                });
+                            }
+                            Ok(response)
+                        }
+                        Err(error) => {
+                            if let (Some(state), Some((mut entry, started))) = (state, access.take()) {
+                                let status = error.as_response_error().status_code();
+                                entry.response_status = status.as_u16();
+                                entry.duration_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+                                let log = state.api_access_log.clone();
+                                actix_web::rt::task::spawn_blocking(move || {
+                                    if let Err(error) = log.append(&entry) {
+                                        eprintln!("[ix.print] failed to write API access log: {}", error);
+                                    }
+                                });
+                            }
+                            Err(error)
+                        }
+                    }
+                }
+            })
     })
     .client_request_timeout(std::time::Duration::from_secs(30))
     .client_disconnect_timeout(std::time::Duration::from_secs(5))

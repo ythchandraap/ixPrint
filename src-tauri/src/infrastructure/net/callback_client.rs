@@ -287,6 +287,7 @@ mod tests {
         // This test exercises delivery/signing with a local receiver. User supplied
         // callback URLs go through validate_url, which intentionally rejects loopback.
         let cb = Callback {
+            token_id: stored.id.clone(),
             url,
             reference: Some("ORDER-42".into()),
             key: stored.hash.clone(),

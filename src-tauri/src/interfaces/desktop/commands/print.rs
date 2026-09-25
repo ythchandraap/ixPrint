@@ -144,6 +144,7 @@ pub async fn test_print(
 ) -> Result<JobResult, String> {
     let state = state.inner().clone();
     let request = JobRequest {
+        job_id: None,
         document: Document::TestPage {
             pages: pages.unwrap_or(1),
         },

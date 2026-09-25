@@ -142,6 +142,9 @@ impl HistoryRepository for FakeHistory {
     fn days(&self) -> Vec<HistoryDay> {
         Vec::new()
     }
+    fn search(&self, _query: &str, _page: usize, _per_page: usize) -> Result<HistoryPage, String> {
+        unreachable!()
+    }
     fn prune(&self, _retention_days: u32) {}
 }
 
@@ -155,6 +158,7 @@ fn state(printer: Arc<FakePrinter>, pdf: Arc<FakePdf>, history: Arc<FakeHistory>
 
 fn request(preset: Option<&str>) -> JobRequest {
     JobRequest {
+        job_id: None,
         document: Document::File(PathBuf::from("source.pdf")),
         file_name: "source.pdf".into(),
         settings: PrintSettings {

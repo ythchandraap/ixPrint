@@ -25,6 +25,10 @@ pub fn queue(printer: &str) -> Result<PrinterQueue, String> {
     backend::queue(printer)
 }
 
+pub fn cancel(printer: &str, spooler_job: &str) -> Result<(), String> {
+    backend::cancel(printer, spooler_job)
+}
+
 pub fn job_status(printer: &str, spooler_job: &str) -> Result<JobStatus, String> {
     let q = queue(printer)?;
     let (state, position, message) = match q.jobs.iter().find(|j| j.id == spooler_job) {
@@ -124,6 +128,10 @@ impl PrinterGateway for LocalPrinterGateway {
 
     fn job_status(&self, printer: &str, spooler_job: &str) -> Result<JobStatus, String> {
         job_status(printer, spooler_job)
+    }
+
+    fn cancel(&self, printer: &str, spooler_job: &str) -> Result<(), String> {
+        cancel(printer, spooler_job)
     }
 }
 

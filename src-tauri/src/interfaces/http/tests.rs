@@ -15,7 +15,10 @@ async fn contract_all_routes_registered() {
         ("GET", "/job-status"),
         ("GET", "/presets"),
         ("GET", "/presets/export"),
+        ("GET", "/presets/shared"),
+        ("GET", "/presets/shared/export?name=test"),
         ("POST", "/print"),
+        ("POST", "/preflight"),
         ("POST", "/test-page"),
         ("GET", "/templates"),
         ("POST", "/print-template"),
@@ -34,6 +37,236 @@ async fn contract_all_routes_registered() {
             "{method} {path}"
         );
     }
+}
+
+#[actix_web::test]
+async fn shared_preset_listing_requires_bearer_and_only_returns_shared_metadata() {
+    let state = state();
+    let (token, stored) = crate::domain::auth::generate("test receiver").unwrap();
+    let token_id = stored.id.clone();
+    state
+        .config
+        .update(&mut |config| {
+            config.require_token = false;
+            config.tokens.push(stored.clone());
+            config.presets.insert("Struk".into(), Default::default());
+            config.presets.insert("Label".into(), Default::default());
+            config.preset_drafts.insert("Draft".into(), Default::default());
+            config.shared_presets.extend(["Struk".into(), "Label".into()]);
+            Ok(())
+        })
+        .unwrap();
+    let app = test::init_service(App::new().app_data(web::Data::new(state.clone())).configure(routes)).await;
+    let unauthenticated = test::call_service(&app, test::TestRequest::get().uri("/presets/shared").to_request()).await;
+    assert_eq!(unauthenticated.status().as_u16(), 401);
+    let query_token = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri(&format!("/presets/shared?token={}", token))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(query_token.status().as_u16(), 401);
+    let alternate_header = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri("/presets/shared")
+            .insert_header(("X-Api-Token", token.as_str()))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(alternate_header.status().as_u16(), 401);
+    let bearer = format!("Bearer {}", token);
+    let disabled = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri("/presets/shared")
+            .insert_header(("Authorization", bearer.as_str()))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(disabled.status().as_u16(), 403);
+    let body: serde_json::Value = test::read_body_json(disabled).await;
+    assert_eq!(body["message"], "Shared preset listing is disabled");
+
+    state
+        .config
+        .update(&mut |config| {
+            config.preset_list_endpoint_enabled = true;
+            Ok(())
+        })
+        .unwrap();
+    let response = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri("/presets/shared")
+            .insert_header(("Authorization", bearer.as_str()))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status().as_u16(), 200);
+    let body: serde_json::Value = test::read_body_json(response).await;
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "presets": [
+                {"name": "Label", "has_design": false},
+                {"name": "Struk", "has_design": false}
+            ]
+        })
+    );
+    assert!(state.token_usage.snapshot().contains_key(&token_id));
+}
+
+#[actix_web::test]
+async fn shared_preset_export_is_one_published_shared_preset_without_defaults() {
+    let state = state();
+    let (token, stored) = crate::domain::auth::generate("test receiver").unwrap();
+    state
+        .config
+        .update(&mut |config| {
+            config.require_token = false;
+            config.tokens.push(stored.clone());
+            config.default_printer = Some("Local printer".into());
+            config.presets.insert("Shared".into(), Default::default());
+            config.presets.insert("Private".into(), Default::default());
+            config.default_preset = Some("Private".into());
+            config.preset_drafts.insert("Shared".into(), Default::default());
+            config.preset_previous.insert("Shared".into(), Default::default());
+            config.shared_presets.insert("Shared".into());
+            Ok(())
+        })
+        .unwrap();
+    let app = test::init_service(App::new().app_data(web::Data::new(state.clone())).configure(routes)).await;
+    let bearer = format!("Bearer {}", token);
+    for uri in [
+        "/presets/shared/export?name=missing",
+        "/presets/shared/export?name=Private",
+    ] {
+        let response = test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri(uri)
+                .insert_header(("Authorization", bearer.as_str()))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status().as_u16(), 404);
+        let body: serde_json::Value = test::read_body_json(response).await;
+        assert_eq!(body["message"], "Preset is not available");
+    }
+    let invalid = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri("/presets/shared/export?name=%20")
+            .insert_header(("Authorization", bearer.as_str()))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(invalid.status().as_u16(), 400);
+    let no_token = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri("/presets/shared/export?name=Shared")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(no_token.status().as_u16(), 401);
+
+    let response = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri("/presets/shared/export?name=Shared")
+            .insert_header(("Authorization", bearer.as_str()))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status().as_u16(), 200);
+    let body_bytes = test::read_body(response).await;
+    let repeated = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri("/presets/shared/export?name=Shared")
+            .insert_header(("Authorization", bearer.as_str()))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(repeated.status().as_u16(), 200);
+    assert_eq!(body_bytes, test::read_body(repeated).await);
+    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(body["format"], "ixprint-presets");
+    assert_eq!(body["exported_at"], "");
+    assert_eq!(body["presets"].as_object().unwrap().len(), 1);
+    assert!(body["presets"].get("Shared").is_some());
+    assert!(body["default_printer"].is_null());
+    assert!(body["default_preset"].is_null());
+    assert!(body["presets"].get("Private").is_none());
+    assert!(body["presets"].get("Draft").is_none());
+}
+
+#[actix_web::test]
+async fn preflight_validates_required_data_without_sending_a_job() {
+    let state = state();
+    let design: crate::domain::template::Template = serde_json::from_value(serde_json::json!({
+        "width_mm": 50, "height_mm": 30,
+        "required_fields": ["sku"],
+        "elements": [{"type":"text", "x":1, "y":1, "w":40, "h":8, "text":"{{sku}}"}]
+    }))
+    .unwrap();
+    state
+        .config
+        .update(&mut |config| {
+            config.presets.insert(
+                "label".into(),
+                crate::domain::preset::Preset {
+                    settings: Default::default(),
+                    design: Some(design.clone()),
+                },
+            );
+            Ok(())
+        })
+        .unwrap();
+    let app = test::init_service(App::new().app_data(web::Data::new(state.clone())).configure(routes)).await;
+    let request = test::TestRequest::post()
+        .uri("/preflight")
+        .insert_header(("Content-Type", "application/json"))
+        .set_payload(r#"{"preset":"label","data":[{}]}"#)
+        .to_request();
+    let response = test::call_service(&app, request).await;
+    assert_eq!(response.status().as_u16(), 200);
+    let report: serde_json::Value = test::read_body_json(response).await;
+    assert_eq!(report["valid"], false);
+    assert_eq!(report["records"], 1);
+    assert_eq!(report["required_fields"][0], "sku");
+    assert!(state.history.days().is_empty());
+}
+
+#[actix_web::test]
+async fn idempotency_key_replays_failure_and_rejects_changed_content() {
+    let state = state();
+    let app = test::init_service(App::new().app_data(web::Data::new(state.clone())).configure(routes)).await;
+    let peer: std::net::SocketAddr = "127.0.0.1:4000".parse().unwrap();
+    let send = |body: &'static str| {
+        test::TestRequest::post()
+            .uri("/print")
+            .peer_addr(peer)
+            .insert_header(("Content-Type", "application/json"))
+            .insert_header(("Idempotency-Key", "order-123"))
+            .set_payload(body)
+            .to_request()
+    };
+    let first = test::call_service(&app, send(r#"{"preset":"missing","data":{"sku":"A"}}"#)).await;
+    assert_eq!(first.status().as_u16(), 400);
+    let second = test::call_service(&app, send(r#"{"preset":"missing","data":{"sku":"A"}}"#)).await;
+    assert_eq!(second.status().as_u16(), 400);
+    let repeated: serde_json::Value = test::read_body_json(second).await;
+    assert!(repeated["message"]
+        .as_str()
+        .unwrap()
+        .contains("Original request failed"));
+    let changed = test::call_service(&app, send(r#"{"preset":"missing","data":{"sku":"B"}}"#)).await;
+    assert_eq!(changed.status().as_u16(), 409);
+    assert_eq!(state.history.days()[0].total, 1);
 }
 
 #[actix_web::test]

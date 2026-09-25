@@ -14,6 +14,7 @@ const emit = defineEmits<{
 
 const newName = ref("");
 const creating = ref(false);
+const listingBusy = ref(false);
 /** Token just created: shown once, until dismissed. */
 const fresh = ref<{ name: string; token: string } | null>(null);
 const usage = ref<Record<string, TokenUse>>({});
@@ -68,6 +69,18 @@ async function toggleRequired(event: Event) {
   } catch (e) {
     input.checked = props.config.require_token;
     emit("notify", errorText(e), true);
+  }
+}
+
+async function setListingEnabled(event: Event) {
+  const enabled = (event.target as HTMLInputElement).checked;
+  listingBusy.value = true;
+  try {
+    emit("config", await api.setPresetListEndpointEnabled(enabled));
+  } catch (e) {
+    emit("notify", errorText(e), true);
+  } finally {
+    listingBusy.value = false;
   }
 }
 
@@ -130,12 +143,30 @@ const when = (iso: string) => new Date(iso).toLocaleString("en-GB", { dateStyle:
       </p>
     </div>
 
+    <fieldset class="stack tight">
+      <legend>Shared preset listing</legend>
+      <label class="row check">
+        <input
+          type="checkbox"
+          :checked="config.preset_list_endpoint_enabled"
+          :disabled="listingBusy"
+          @change="setListingEnabled"
+        />
+        <span class="grow">Allow API listing</span>
+        <span class="meta">{{ config.preset_list_endpoint_enabled ? "Enabled" : "Disabled" }}</span>
+      </label>
+      <p class="hint">
+        Token-authenticated computers can fetch shared published presets, including designs and sample data. With listing
+        off, they need the preset name.
+      </p>
+    </fieldset>
+
     <div v-if="fresh" class="card stack tight fresh">
       <strong>Token "{{ fresh.name }}" created</strong>
       <p class="small-text">Copy it now. This token is <b>shown only once</b>; ix.print stores only its hash.</p>
       <div class="row">
         <code class="grow token">{{ fresh.token }}</code>
-        <button class="icon" title="Copy token" @click="emit('copy', fresh.token)"><Copy :size="16" /></button>
+        <button class="icon" title="Copy token" aria-label="Copy token" @click="emit('copy', fresh.token)"><Copy :size="16" /></button>
       </div>
       <div class="row end">
         <button class="ghost small" @click="fresh = null">Already copied</button>
@@ -167,7 +198,7 @@ const when = (iso: string) => new Date(iso).toLocaleString("en-GB", { dateStyle:
           <template v-else>Not used since ix.print started</template>
         </div>
       </div>
-      <button class="icon danger" title="Revoke token" @click="revoke(t.id, t.name)"><Trash2 :size="16" /></button>
+      <button class="icon danger" title="Revoke token" :aria-label="`Revoke token ${t.name}`" @click="revoke(t.id, t.name)"><Trash2 :size="16" /></button>
     </div>
 
     <fieldset class="stack tight">
@@ -180,7 +211,7 @@ const when = (iso: string) => new Date(iso).toLocaleString("en-GB", { dateStyle:
       <div v-for="o in config.allowed_origins" :key="o" class="card row">
         <Globe :size="16" />
         <code class="grow truncate">{{ o === "*" ? "* (all websites)" : o }}</code>
-        <button class="icon danger" title="Remove permission" @click="removeOrigin(o)"><Trash2 :size="16" /></button>
+        <button class="icon danger" title="Remove permission" :aria-label="`Remove website permission for ${o}`" @click="removeOrigin(o)"><Trash2 :size="16" /></button>
       </div>
       <form class="row" @submit.prevent="addOrigin">
         <input v-model="newOrigin" class="grow" required placeholder="https://app.example.com" />
@@ -214,7 +245,7 @@ X-Api-Token: fxp_…
   color: var(--text);
 }
 .token {
-  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   word-break: break-all;
   background: var(--surface);

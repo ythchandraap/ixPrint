@@ -22,3 +22,25 @@ pub fn history_page(
 ) -> Result<HistoryPage, String> {
     crate::application::history_service::page(&state, &date, page, per_page, failed_only)
 }
+
+#[tauri::command]
+pub async fn search_history(
+    state: AppStateRef<'_>,
+    query: String,
+    page: usize,
+    per_page: usize,
+) -> Result<HistoryPage, String> {
+    let state = state.inner().clone();
+    super::super::blocking(move || crate::application::history_service::search(&state, &query, page, per_page)).await?
+}
+
+#[tauri::command]
+pub fn retry_callback(state: AppStateRef<'_>, job_id: String) -> Result<(), String> {
+    crate::application::callback_service::retry_failed(state.inner().clone(), &job_id)
+}
+
+#[tauri::command]
+pub async fn cancel_own_job(state: AppStateRef<'_>, job_id: String) -> Result<(), String> {
+    let state = state.inner().clone();
+    super::super::blocking(move || crate::application::printer_service::cancel_own_job(&state, &job_id)).await?
+}

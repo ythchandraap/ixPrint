@@ -3,7 +3,7 @@
 use super::preset::{validate_preset_name, LegacyTemplate, Preset};
 use crate::domain::auth::ApiToken;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// 2: templates became the optional `design` of a preset.
 pub const CONFIG_VERSION: u32 = 2;
@@ -67,6 +67,18 @@ pub struct Config {
     pub default_preset: Option<String>,
     #[serde(default)]
     pub presets: BTreeMap<String, Preset>,
+    /// Local unpublished edits. HTTP requests resolve only `presets`.
+    #[serde(default)]
+    pub preset_drafts: BTreeMap<String, Preset>,
+    /// One previous published version per preset for immediate rollback.
+    #[serde(default)]
+    pub preset_previous: BTreeMap<String, Preset>,
+    /// Published presets available through the authenticated LAN sharing endpoints.
+    #[serde(default)]
+    pub shared_presets: BTreeSet<String>,
+    /// Whether the optional shared preset listing endpoint is enabled.
+    #[serde(default)]
+    pub preset_list_endpoint_enabled: bool,
     /// Days of print history to keep.
     #[serde(default = "default_retention")]
     pub history_retention_days: u32,
@@ -99,6 +111,10 @@ impl Default for Config {
             default_printer: None,
             default_preset: None,
             presets: BTreeMap::new(),
+            preset_drafts: BTreeMap::new(),
+            preset_previous: BTreeMap::new(),
+            shared_presets: BTreeSet::new(),
+            preset_list_endpoint_enabled: false,
             history_retention_days: default_retention(),
             require_token: true,
             allowed_origins: Vec::new(),
@@ -118,6 +134,16 @@ impl Config {
         for (name, preset) in &self.presets {
             validate_preset_name(name)?;
             preset.validate().map_err(|e| format!("Preset '{}': {}", name, e))?;
+        }
+        for (name, preset) in self.preset_drafts.iter().chain(&self.preset_previous) {
+            validate_preset_name(name)?;
+            preset.validate().map_err(|e| format!("Preset '{}': {}", name, e))?;
+        }
+        for name in &self.shared_presets {
+            validate_preset_name(name)?;
+            if !self.presets.contains_key(name) {
+                return Err(format!("Shared preset '{}' does not exist as a published preset", name));
+            }
         }
         if let Some(p) = &self.default_preset {
             if !self.presets.contains_key(p) {

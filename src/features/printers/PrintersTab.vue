@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from "vue";
-import { Copy, Pencil, Plus, Printer, RefreshCw, Star } from "lucide-vue-next";
+import { Copy, Info, Pencil, Plus, Printer, RefreshCw, Star } from "lucide-vue-next";
 import EmptyState from "@/shared/ui/EmptyState.vue";
 import PrinterDeviceForm from "./PrinterDeviceForm.vue";
 import { api, errorText, type Config, type PrinterQueue, type PrinterView } from "@/shared/api";
@@ -29,6 +29,7 @@ const emit = defineEmits<{
 
 /** Add/edit form for an OS printer; `name` undefined = add. */
 const device = ref<{ name?: string } | null>(null);
+const OFFLINE_MESSAGE = "Printer is offline or not responding";
 
 function deviceDone(message: string, config?: Config) {
   device.value = null;
@@ -69,23 +70,24 @@ onBeforeUnmount(() => clearInterval(queueTimer));
 </script>
 
 <template>
-  <PrinterDeviceForm
-    v-if="device"
-    :name="device.name"
-    :os="os"
-    :config="config!"
-    @done="deviceDone"
-    @cancel="device = null"
-  />
-  <section v-else class="stack">
+  <Transition name="detail" mode="out-in">
+    <PrinterDeviceForm
+      v-if="device"
+      :name="device.name"
+      :os="os"
+      :config="config!"
+      @done="deviceDone"
+      @cancel="device = null"
+    />
+    <section v-else class="stack">
     <div class="row">
       <span class="grow meta"
         >{{ printers.length }} printer{{ printers.length === 1 ? "" : "s" }} · updated automatically</span
       >
-      <button class="ghost small" :disabled="refreshing" title="Find new printers now" @click="emit('refresh')">
+      <button v-if="printers.length" class="ghost small" :disabled="refreshing" title="Find new printers now" @click="emit('refresh')">
         <RefreshCw :size="14" :class="{ spin: refreshing }" /> Refresh
       </button>
-      <button class="ghost small" title="Add a printer to the system" @click="device = {}">
+      <button v-if="printers.length" class="ghost small" title="Add a printer to the system" @click="device = {}">
         <Plus :size="14" /> Add
       </button>
     </div>
@@ -103,47 +105,75 @@ onBeforeUnmount(() => clearInterval(queueTimer));
       No ix.print default printer is set, so the system default printer is used. Click ☆ to choose one.
     </p>
 
-    <label
-      v-for="printer in printers"
+    <div
+      v-for="(printer, index) in printers"
       :key="printer.name"
-      class="row card"
+      class="row card printer-row"
       :class="{ active: selected === printer.name }"
     >
-      <input type="radio" name="printer" :checked="selected === printer.name" @change="emit('select', printer.name)" />
-      <div class="grow min0">
-        <div class="truncate strong">{{ printer.name }}</div>
-        <div class="meta">
-          <span :class="['status', printer.status.toLowerCase()]">{{ printer.status }}</span>
-          <span v-if="printer.is_default" class="badge">default ix.print</span>
-          <span v-if="printer.os_default" class="badge subtle">system default</span>
-          <span v-if="printer.remote" class="badge subtle">via {{ printer.remote }}</span>
-        </div>
-        <div
-          v-if="printer.message"
-          :class="printer.status === 'Normal' || printer.status === 'Printing' ? 'hint' : 'error small-text'"
-        >
-          {{ printer.message }}
-        </div>
+      <div class="printer-select grow min0">
+        <input
+          :id="`printer-select-${index}`"
+          type="radio"
+          name="printer"
+          :checked="selected === printer.name"
+          @change="emit('select', printer.name)"
+        />
+        <span class="printer-info min0 grow">
+          <label class="printer-name truncate strong" :for="`printer-select-${index}`">{{ printer.name }}</label>
+          <span class="meta">
+            <span class="printer-status-group">
+              <label class="printer-status-label" :for="`printer-select-${index}`">
+                <span :class="['status', printer.status.toLowerCase()]">{{ printer.status }}</span>
+              </label>
+              <button
+                v-if="printer.message === OFFLINE_MESSAGE"
+                class="printer-message-info"
+                type="button"
+                aria-label="Printer status information"
+                :aria-describedby="`printer-status-tooltip-${index}`"
+              >
+                <Info :size="14" aria-hidden="true" />
+                <span :id="`printer-status-tooltip-${index}`" class="printer-message-tooltip" role="tooltip">
+                  {{ printer.message }}
+                </span>
+              </button>
+            </span>
+            <label v-if="printer.os_default || printer.remote" class="printer-meta-label" :for="`printer-select-${index}`">
+              <span v-if="printer.os_default" class="badge subtle">system default</span>
+              <span v-if="printer.remote" class="badge subtle">via {{ printer.remote }}</span>
+            </label>
+          </span>
+          <span
+            v-if="printer.message && printer.message !== OFFLINE_MESSAGE"
+            :class="printer.status === 'Normal' || printer.status === 'Printing' ? 'hint' : 'error small-text'"
+          >
+            {{ printer.message }}
+          </span>
+        </span>
       </div>
       <button
         class="icon"
-        :title="config?.default_printer === printer.name ? 'Remove as default' : 'Set as default printer'"
-        @click.prevent="emit('toggle-default', printer.name)"
+        :title="config?.default_printer === printer.name ? 'Remove ix.print default printer' : 'Set as ix.print default printer'"
+        :aria-label="config?.default_printer === printer.name ? 'Remove ix.print default printer' : 'Set as ix.print default printer'"
+        :aria-pressed="config?.default_printer === printer.name"
+        @click="emit('toggle-default', printer.name)"
       >
         <Star :size="16" :fill="config?.default_printer === printer.name ? 'currentColor' : 'none'" />
       </button>
-      <button class="icon" title="Copy printer name" @click.prevent="emit('copy', printer.name)">
+      <button class="icon" title="Copy printer name" aria-label="Copy printer name" @click="emit('copy', printer.name)">
         <Copy :size="16" />
       </button>
       <button
         v-if="!printer.remote"
         class="icon"
         title="Edit / remove printer"
-        @click.prevent="device = { name: printer.name }"
+        aria-label="Edit or remove printer"
+        @click="device = { name: printer.name }"
       >
         <Pencil :size="16" />
       </button>
-    </label>
+    </div>
 
     <fieldset v-if="selected">
       <legend>Queue for {{ selected }}</legend>
@@ -167,10 +197,105 @@ onBeforeUnmount(() => clearInterval(queueTimer));
       <p v-else class="muted">Loading queue…</p>
     </fieldset>
     <p v-else-if="printers.length" class="hint">Select a printer to view its queue.</p>
-  </section>
+    </section>
+  </Transition>
 </template>
 
 <style scoped>
+.printer-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--row-height);
+  cursor: pointer;
+}
+.printer-select input {
+  flex: none;
+}
+.printer-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.printer-name,
+.printer-status-label,
+.printer-meta-label {
+  cursor: pointer;
+}
+.printer-status-label,
+.printer-meta-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.printer-row .meta {
+  align-items: center;
+}
+.printer-status-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+.printer-message-info {
+  position: relative;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  line-height: inherit;
+  text-align: left;
+  flex: none;
+  padding: 0;
+  color: var(--danger);
+  background: transparent;
+  border: 0;
+  cursor: help;
+}
+.printer-message-tooltip {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  display: block;
+  width: max-content;
+  max-width: min(260px, calc(100vw - 32px));
+  padding: 6px 8px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-control);
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 400;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 18%);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(var(--motion-offset));
+  transition:
+    opacity var(--motion-popover-duration) var(--ease),
+    transform var(--motion-popover-duration) var(--ease),
+    visibility 0s linear var(--motion-popover-duration);
+}
+.printer-message-info:hover .printer-message-tooltip,
+.printer-message-info:focus .printer-message-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition-delay: 0s;
+}
+.printer-row .meta .badge {
+  line-height: 16px;
+  padding: 0 4px;
+}
+.printer-row .error.small-text {
+  font-size: 13px;
+  line-height: 19px;
+}
 .queue-row {
   align-items: flex-start;
   padding: 4px 0;
@@ -182,6 +307,13 @@ onBeforeUnmount(() => clearInterval(queueTimer));
 }
 .error-text {
   color: var(--danger);
+}
+@media (pointer: coarse) {
+  .printer-message-info {
+    min-width: 44px;
+    min-height: 44px;
+    margin: -10px;
+  }
 }
 .spin {
   animation: spin 0.8s linear infinite;

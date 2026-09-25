@@ -281,6 +281,7 @@ pub(crate) fn forward(state: &AppState, request: ForwardRequest<'_>) -> Result<J
                         crate::domain::template::MAX_RECORDS
                     )));
                 }
+                design.preflight(records, header).map_err(RemoteError::BadRequest)?;
                 state
                     .pdf_engine
                     .render_template(&generated, design, records, header)
@@ -342,6 +343,7 @@ mod tests {
         };
         let preset = crate::domain::preset::Preset::default();
         let req = JobRequest {
+            job_id: None,
             document: Document::File("source.pdf".into()),
             file_name: "source.pdf".into(),
             settings: PrintSettings::default(),

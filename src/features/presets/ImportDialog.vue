@@ -5,7 +5,9 @@ import { summarize } from "@/shared/lib/preset";
 import AutocompleteField from "@/shared/ui/AutocompleteField.vue";
 
 const props = defineProps<{
-  path: string;
+  source:
+    | { kind: "file"; path: string }
+    | { kind: "remote"; remoteId: string; remoteName: string; name: string; bundleSha256: string };
   preview: ImportPreview;
   printers: PrinterView[];
 }>();
@@ -34,6 +36,15 @@ const actionOptions = [
   { value: "rename", label: "Save under a new name" },
   { value: "skip", label: "Skip" },
 ];
+function settingsSummary(settings: ImportPreview["items"][number]["settings"]) {
+  const details = [summarize(settings)];
+  if (settings.margins) details.push(`margins ${settings.margins}`);
+  if (settings.offset_x || settings.offset_y)
+    details.push(`offset ${settings.offset_x ?? 0}, ${settings.offset_y ?? 0} mm`);
+  if (settings.tray) details.push(`tray ${settings.tray}`);
+  if (settings.dpi) details.push(`${settings.dpi} dpi`);
+  return details.join(" · ");
+}
 function printerOptions(row: (typeof rows)[number]) {
   return [
     {
@@ -56,16 +67,25 @@ async function apply() {
   error.value = "";
   busy.value = true;
   try {
-    const { config, imported } = await api.applyImport(props.path, {
-      replace_all: replaceAll.value,
-      include_defaults: includeDefaults.value,
+    const options = {
+      replace_all: props.source.kind === "file" && replaceAll.value,
+      include_defaults: props.source.kind === "file" && includeDefaults.value,
       decisions: rows.map((r) => ({
         name: r.item.name,
         action: r.action,
         new_name: r.action === "rename" && r.newName.trim() ? r.newName.trim() : undefined,
         printer: r.printer === "keep" ? undefined : r.printer,
       })),
-    });
+    };
+    const { config, imported } =
+      props.source.kind === "file"
+        ? await api.applyImport(props.source.path, options)
+        : await api.applyRemotePresetImport(
+            props.source.remoteId,
+            props.source.name,
+            props.source.bundleSha256,
+            options,
+          );
     emit("done", config, imported);
   } catch (e) {
     error.value = errorText(e);
@@ -77,8 +97,9 @@ async function apply() {
 
 <template>
   <div class="stack">
-    <h3 class="section-title">Import preset</h3>
-    <p class="hint truncate" :title="path">{{ path }}</p>
+    <h3 class="section-title">{{ source.kind === "remote" ? "Import from remote" : "Import preset" }}</h3>
+    <p v-if="source.kind === 'file'" class="hint truncate" :title="source.path">{{ source.path }}</p>
+    <p v-else class="hint">{{ source.remoteName }} · {{ source.name }} · fetched again before import</p>
 
     <div v-for="row in rows" :key="row.item.name" class="card stack tight">
       <div class="row">
@@ -86,7 +107,11 @@ async function apply() {
         <span v-if="row.item.exists" class="badge warn">exists</span>
         <span v-else class="badge">new</span>
       </div>
-      <div class="meta">{{ summarize(row.item.settings) }}</div>
+      <div class="meta">{{ settingsSummary(row.item.settings) }}</div>
+      <div class="meta">
+        Printer: {{ row.item.settings.printer || "default printer" }} · Design:
+        {{ row.item.settings.design ? "yes" : "no" }}
+      </div>
 
       <label class="field">
         <span>Action</span>
@@ -108,11 +133,11 @@ async function apply() {
       </label>
     </div>
 
-    <label class="row check">
+    <label v-if="source.kind === 'file'" class="row check">
       <input v-model="replaceAll" type="checkbox" />
       <span>Remove all existing presets and replace them with the file contents</span>
     </label>
-    <label v-if="preview.default_printer || preview.default_preset" class="row check">
+    <label v-if="source.kind === 'file' && (preview.default_printer || preview.default_preset)" class="row check">
       <input v-model="includeDefaults" type="checkbox" />
       <span>
         Also use the defaults from the file:
@@ -126,8 +151,18 @@ async function apply() {
 
     <p v-if="error" class="error">{{ error }}</p>
     <div class="row end">
-      <button class="ghost" @click="emit('cancel')">Cancel</button>
-      <button class="primary" :disabled="busy" @click="apply">{{ busy ? "Importing…" : "Import" }}</button>
+      <button class="ghost" :disabled="busy" @click="emit('cancel')">Cancel</button>
+      <button
+        class="primary"
+        :disabled="
+          busy ||
+          rows.some((row) => row.action === 'rename' && !row.newName.trim()) ||
+          (source.kind === 'remote' && !preview.bundle_sha256)
+        "
+        @click="apply"
+      >
+        {{ busy ? "Importing…" : "Import" }}
+      </button>
     </div>
   </div>
 </template>

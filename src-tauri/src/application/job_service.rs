@@ -7,12 +7,22 @@ use crate::application::ports::JobMarker;
 use crate::application::state::AppState;
 use crate::domain::history::HistoryEntry;
 use crate::domain::job::{design_paper, Document, JobError, JobRequest, JobResult, MAX_TEST_PAGES};
+use crate::domain::preset::Preset;
 use crate::domain::printer::DeviceOptions;
 use crate::domain::settings::{Align, JobSettings, Margins, Orientation, Paper, Scale};
 
 pub fn run(state: &AppState, req: JobRequest) -> Result<JobResult, JobError> {
+    run_with_preset(state, req, None)
+}
+
+/// Desktop-only test path. The published preset remains untouched.
+pub fn run_with_preset(
+    state: &AppState,
+    req: JobRequest,
+    preset_override: Option<Preset>,
+) -> Result<JobResult, JobError> {
     let started = Instant::now();
-    let job_id = uuid::Uuid::new_v4().to_string();
+    let job_id = req.job_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let config = state.config.get();
     let preset_name = req.preset.clone().or(config.default_preset.clone());
 
@@ -36,13 +46,17 @@ pub fn run(state: &AppState, req: JobRequest) -> Result<JobResult, JobError> {
     };
 
     let result = (|| -> Result<JobResult, JobError> {
-        let preset = match &preset_name {
-            Some(name) => config
-                .presets
-                .get(name)
-                .cloned()
-                .ok_or_else(|| JobError::BadRequest(format!("Preset '{}' was not found", name)))?,
-            None => Default::default(),
+        let preset = if let Some(draft) = &preset_override {
+            draft.clone()
+        } else {
+            match &preset_name {
+                Some(name) => config
+                    .presets
+                    .get(name)
+                    .cloned()
+                    .ok_or_else(|| JobError::BadRequest(format!("Preset '{}' was not found", name)))?,
+                None => Default::default(),
+            }
         };
         let merged = preset.settings.overlay(&req.settings);
         merged.validate().map_err(JobError::BadRequest)?;
@@ -112,6 +126,7 @@ pub fn run(state: &AppState, req: JobRequest) -> Result<JobResult, JobError> {
                         crate::domain::template::MAX_RECORDS
                     )));
                 }
+                template.preflight(records, header).map_err(JobError::BadRequest)?;
                 state
                     .pdf_engine
                     .render_template(&generated, template, records, header)
@@ -125,7 +140,9 @@ pub fn run(state: &AppState, req: JobRequest) -> Result<JobResult, JobError> {
                 generated.clone()
             }
             Document::TestPage { pages } if preset.design.is_some() => {
-                let design = preset.design.as_ref().expect("guard checked design");
+                let Some(design) = preset.design.as_ref() else {
+                    return Err(JobError::BadRequest("Preset has no design".into()));
+                };
                 let records = vec![design.sample.clone(); (*pages).clamp(1, MAX_TEST_PAGES) as usize];
                 state
                     .pdf_engine

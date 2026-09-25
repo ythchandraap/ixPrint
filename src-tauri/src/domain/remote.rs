@@ -36,6 +36,18 @@ pub struct RemoteView {
     pub printers: usize,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct SharedPreset {
+    pub name: String,
+    pub has_design: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct SharedPresetListing {
+    pub listing_enabled: bool,
+    pub presets: Vec<SharedPreset>,
+}
+
 pub struct CacheEntry {
     pub fetched: Instant,
     pub printers: Vec<printer::Printer>,

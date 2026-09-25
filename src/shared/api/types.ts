@@ -99,6 +99,8 @@ export interface Template {
   elements: TemplateElement[];
   /** Example data for the preview and test prints. */
   sample: TemplateRecord;
+  /** Optional validation contract for incoming JSON data. */
+  required_fields?: string[];
 }
 
 /** Print settings plus an optional design; with a design, clients send only data (JSON). */
@@ -116,6 +118,10 @@ export interface Config {
   default_printer?: string;
   default_preset?: string;
   presets: Record<string, Preset>;
+  preset_drafts: Record<string, Preset>;
+  preset_previous: Record<string, Preset>;
+  shared_presets: string[];
+  preset_list_endpoint_enabled: boolean;
   history_retention_days: number;
 }
 
@@ -142,6 +148,16 @@ export interface RemoteView {
   online: boolean | null;
   last_error: string | null;
   printers: number;
+}
+
+export interface SharedPreset {
+  name: string;
+  has_design: boolean;
+}
+
+export interface SharedPresetListing {
+  listing_enabled: boolean;
+  presets: SharedPreset[];
 }
 
 export interface PaperInfo {
@@ -252,6 +268,7 @@ export interface ImportPreview {
   default_printer?: string;
   default_printer_missing: boolean;
   default_preset?: string;
+  bundle_sha256?: string;
 }
 
 export type ImportAction = "overwrite" | "skip" | "rename";
@@ -299,6 +316,7 @@ export interface HistoryEntry {
 
 export interface CallbackStatus {
   url: string;
+  token_id?: string;
   reference?: string;
   state: "watching" | "retrying" | "delivered" | "failed" | "refused";
   /** Job outcome sent in the callback (completed, failed, …). */
@@ -324,6 +342,24 @@ export interface DiagnosticEntry {
   source: string;
   message: string;
   details?: string;
+}
+
+export interface ApiAccessEntry {
+  id: string;
+  time: string;
+  method: string;
+  path: string;
+  client?: string;
+  auth: "recognized-token" | "no-credential" | "unrecognized-credential" | "desktop";
+  token?: string;
+  request_content_type?: string;
+  request_bytes?: number;
+  origin?: string;
+  user_agent?: string;
+  response_status: number;
+  response_content_type?: string;
+  response_bytes?: number;
+  duration_ms: number;
 }
 
 export interface JobResult {
