@@ -1,6 +1,39 @@
 use serde::Serialize;
 
 use crate::application::state::AppState;
+
+/// Cancel only a local spooler job previously submitted by this installation.
+/// The queue lookup prevents acting on a reused or already-finished spooler ID.
+pub fn cancel_own_job(state: &AppState, job_id: &str) -> Result<(), String> {
+    let entry = state
+        .history
+        .find(job_id)
+        .ok_or("Job was not found in recent history")?;
+    if !status_is_recent(&entry.time) {
+        return Err("Only recent jobs can be cancelled".into());
+    }
+    if !entry.success || entry.remote.is_some() {
+        return Err("Only a local submitted job can be cancelled here".into());
+    }
+    let spooler = entry
+        .spooler_job
+        .ok_or("The printer did not provide a spooler job ID")?;
+    let queue = state.printer_gateway.queue(&entry.printer)?;
+    let job = queue
+        .jobs
+        .iter()
+        .find(|job| job.id == spooler)
+        .ok_or("Job is no longer in the queue")?;
+    if !matches!(
+        job.state,
+        crate::domain::printer::JobState::Queued
+            | crate::domain::printer::JobState::Paused
+            | crate::domain::printer::JobState::Error
+    ) {
+        return Err("Job has already started or finished printing".into());
+    }
+    state.printer_gateway.cancel(&entry.printer, &spooler)
+}
 use crate::domain::printer::{Capabilities, Printer, PrinterQueue};
 use crate::domain::printer_admin::{Device, Driver, NewPrinter, PrinterDetails, PrinterEdit};
 use crate::domain::remote::{RemoteError, Target, SEPARATOR};
@@ -111,6 +144,8 @@ pub fn job_status_json(state: &AppState, job_id: &str) -> Option<serde_json::Val
     });
     let status = if !entry.success {
         serde_json::json!({ "state": "failed", "message": entry.error })
+    } else if !status_is_recent(&entry.time) {
+        serde_json::json!({ "state": "unknown", "message": "Live queue status is unavailable for older jobs" })
     } else if let Some(remote_job) = &entry.remote {
         let mut status = match state
             .remotes
@@ -151,6 +186,13 @@ pub fn job_status_json(state: &AppState, job_id: &str) -> Option<serde_json::Val
         target.extend(source.clone());
     }
     Some(merged)
+}
+
+fn status_is_recent(time: &str) -> bool {
+    chrono::DateTime::parse_from_rfc3339(time).ok().is_some_and(|then| {
+        let age = chrono::Utc::now().signed_duration_since(then.with_timezone(&chrono::Utc));
+        age >= chrono::Duration::zero() && age < chrono::Duration::days(2)
+    })
 }
 
 pub fn reject_remote_printer(state: &AppState, name: &str) -> Result<(), String> {
@@ -210,10 +252,14 @@ pub fn update_local(state: &AppState, name: &str, edit: &PrinterEdit) -> Result<
             }
         };
         rename(&mut config.default_printer);
-        config
+        for preset in config
             .presets
             .values_mut()
-            .for_each(|preset| rename(&mut preset.settings.printer));
+            .chain(config.preset_drafts.values_mut())
+            .chain(config.preset_previous.values_mut())
+        {
+            rename(&mut preset.settings.printer);
+        }
         Ok(())
     })
 }
@@ -232,4 +278,100 @@ pub fn remove(state: &AppState, name: &str) -> Result<Config, String> {
 pub fn set_os_default(state: &AppState, name: &str) -> Result<(), String> {
     reject_remote_printer(state, name)?;
     state.printer_admin.set_os_default(name)
+}
+
+#[cfg(test)]
+mod cancel_tests {
+    use super::*;
+    use crate::application::ports::PrinterGateway;
+    use crate::application::state::test_support::state;
+    use crate::domain::history::HistoryEntry;
+    use crate::domain::layout::Sheet;
+    use crate::domain::printer::{Capabilities, DeviceOptions, JobState, JobStatus, Printer, PrinterQueue, QueueJob};
+    use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    struct QueuePrinter {
+        state: JobState,
+        cancelled: AtomicUsize,
+    }
+    impl PrinterGateway for QueuePrinter {
+        fn list_printers(&self) -> Vec<Printer> {
+            vec![]
+        }
+        fn os_default_printer(&self) -> Option<String> {
+            None
+        }
+        fn capabilities(&self, _: &str) -> Result<Capabilities, String> {
+            unreachable!()
+        }
+        fn default_paper_mm(&self, _: &str) -> (f32, f32) {
+            (210.0, 297.0)
+        }
+        fn print(&self, _: &str, _: &Path, _: &[Sheet], _: &DeviceOptions) -> Result<Option<String>, String> {
+            unreachable!()
+        }
+        fn queue(&self, printer: &str) -> Result<PrinterQueue, String> {
+            Ok(PrinterQueue {
+                printer: printer.into(),
+                status: "Normal".into(),
+                message: None,
+                jobs: vec![QueueJob {
+                    id: "spool-1".into(),
+                    document: "test".into(),
+                    position: 1,
+                    state: self.state,
+                    message: None,
+                    pages: None,
+                    pages_printed: None,
+                }],
+            })
+        }
+        fn job_status(&self, _: &str, _: &str) -> Result<JobStatus, String> {
+            unreachable!()
+        }
+        fn cancel(&self, _: &str, _: &str) -> Result<(), String> {
+            self.cancelled.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn cancellation_is_limited_to_own_waiting_job() {
+        let mut app = Arc::try_unwrap(state()).ok().unwrap();
+        let printer = Arc::new(QueuePrinter {
+            state: JobState::Queued,
+            cancelled: AtomicUsize::new(0),
+        });
+        app.printer_gateway = printer.clone();
+        let entry = HistoryEntry {
+            id: "own-job".into(),
+            time: chrono::Local::now().to_rfc3339(),
+            source: "app".into(),
+            client: None,
+            token: None,
+            file_name: "test".into(),
+            preset: None,
+            printer: "Printer".into(),
+            spooler_job: Some("spool-1".into()),
+            sheets: 1,
+            settings: serde_json::json!({}),
+            success: true,
+            error: None,
+            duration_ms: 1,
+            callback: None,
+            remote: None,
+        };
+        app.history.append(&entry).unwrap();
+        assert!(cancel_own_job(&app, "own-job").is_ok());
+        assert_eq!(printer.cancelled.load(Ordering::SeqCst), 1);
+        assert!(cancel_own_job(&app, "someone-else").is_err());
+        assert_eq!(printer.cancelled.load(Ordering::SeqCst), 1);
+        app.printer_gateway = Arc::new(QueuePrinter {
+            state: JobState::Printing,
+            cancelled: AtomicUsize::new(0),
+        });
+        assert!(cancel_own_job(&app, "own-job").is_err());
+    }
 }

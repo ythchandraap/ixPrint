@@ -35,6 +35,26 @@ pub struct HistoryEntry {
     pub remote: Option<RemoteJob>,
 }
 
+impl HistoryEntry {
+    pub fn matches_query(&self, query: &str) -> bool {
+        let query = query.to_lowercase();
+        [
+            Some(self.id.as_str()),
+            Some(self.file_name.as_str()),
+            Some(self.printer.as_str()),
+            Some(self.source.as_str()),
+            self.client.as_deref(),
+            self.token.as_deref(),
+            self.preset.as_deref(),
+            self.callback.as_ref().and_then(|c| c.reference.as_deref()),
+            self.remote.as_ref().map(|remote| remote.remote_name.as_str()),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|value| value.to_lowercase().contains(&query))
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct RemoteJob {
     pub remote_id: String,
@@ -46,6 +66,9 @@ pub struct RemoteJob {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct CallbackStatus {
     pub url: String,
+    /// Token identifier allows a pending signed delivery to resume after restart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference: Option<String>,
     /// watching (job not done yet) | retrying | delivered | failed | refused

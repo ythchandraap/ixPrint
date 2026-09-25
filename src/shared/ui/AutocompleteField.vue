@@ -144,26 +144,28 @@ async function openFromClick() {
       type="button"
       class="autocomplete-toggle"
       :disabled="disabled"
-      tabindex="-1"
       aria-label="Show options"
-      @mousedown.prevent="openFromClick"
+      @mousedown.prevent
+      @click="openFromClick"
     >
       <ChevronDown :size="15" />
     </button>
-    <div v-if="open && suggestions.length" class="autocomplete-menu" role="listbox">
-      <button
-        v-for="(option, i) in suggestions"
-        :key="option.value"
-        type="button"
-        :class="['autocomplete-option', { active: active === i }]"
-        :aria-selected="option.value === modelValue"
-        @mousedown.prevent
-        @click="choose(option)"
-      >
-        <span class="grow truncate">{{ option.label }}</span>
-        <span v-if="option.meta" class="autocomplete-meta">{{ option.meta }}</span>
-      </button>
-    </div>
+    <Transition name="popover">
+      <div v-if="open && suggestions.length" class="autocomplete-menu" role="listbox">
+        <button
+          v-for="(option, i) in suggestions"
+          :key="option.value"
+          type="button"
+          :class="['autocomplete-option', { active: active === i }]"
+          :aria-selected="option.value === modelValue"
+          @mousedown.prevent
+          @click="choose(option)"
+        >
+          <span class="grow truncate">{{ option.label }}</span>
+          <span v-if="option.meta" class="autocomplete-meta">{{ option.meta }}</span>
+        </button>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -180,7 +182,7 @@ async function openFromClick() {
   right: 1px;
   top: 1px;
   bottom: 1px;
-  width: 32px;
+  width: 44px;
   display: grid;
   place-items: center;
   border: 0;
@@ -208,11 +210,11 @@ async function openFromClick() {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
-  box-shadow: 0 8px 20px rgb(0 0 0 / 0.16);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.1);
 }
 .autocomplete-option {
   width: 100%;
-  min-height: 32px;
+  min-height: var(--control-height);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -222,7 +224,7 @@ async function openFromClick() {
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
   text-align: left;
   cursor: pointer;
 }
@@ -232,7 +234,7 @@ async function openFromClick() {
 }
 .autocomplete-meta {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.04em;
   color: var(--brand);
 }

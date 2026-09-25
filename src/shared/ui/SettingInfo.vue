@@ -41,8 +41,16 @@ function hideWhenAnotherOpens() {
   if (open.value) open.value = false;
 }
 
+function closePopover() {
+  open.value = false;
+  nextTick(() => trigger.value?.focus());
+}
+
 function toggle() {
-  if (!open.value) window.dispatchEvent(new Event(INFO_OPEN_EVENT));
+  if (!open.value) {
+    positionPopover();
+    window.dispatchEvent(new Event(INFO_OPEN_EVENT));
+  }
   open.value = !open.value;
 }
 
@@ -72,32 +80,35 @@ onBeforeUnmount(() => window.removeEventListener(INFO_OPEN_EVENT, hideWhenAnothe
       aria-haspopup="dialog"
       :title="`About ${title}`"
       @click.stop="toggle"
-      @keydown.esc="open = false"
+      @keydown.esc.stop.prevent="closePopover"
     >
       <Info :size="15" />
     </button>
     <Teleport to="body">
-      <span
-        v-if="open"
-        class="setting-info-popover"
-        :style="popoverStyle"
-        role="dialog"
-        :aria-label="title"
-        @click.stop
-      >
-        <span class="setting-info-title">
-          <strong>{{ title }}</strong>
-          <button
-            type="button"
-            class="setting-info-close"
-            :aria-label="`Close ${title} information`"
-            @click="open = false"
-          >
-            <X :size="14" />
-          </button>
+      <Transition name="popover">
+        <span
+          v-if="open"
+          class="setting-info-popover"
+          :style="popoverStyle"
+          role="dialog"
+          :aria-label="title"
+          @click.stop
+          @keydown.esc.stop.prevent="closePopover"
+        >
+          <span class="setting-info-title">
+            <strong>{{ title }}</strong>
+            <button
+              type="button"
+              class="setting-info-close"
+              :aria-label="`Close ${title} information`"
+              @click="closePopover"
+            >
+              <X :size="14" />
+            </button>
+          </span>
+          <span class="setting-info-content"><slot /></span>
         </span>
-        <span class="setting-info-content"><slot /></span>
-      </span>
+      </Transition>
     </Teleport>
   </span>
 </template>
@@ -121,10 +132,10 @@ onBeforeUnmount(() => window.removeEventListener(INFO_OPEN_EVENT, hideWhenAnothe
 }
 
 .setting-info-button {
-  width: 25px;
-  height: 25px;
+  width: var(--icon-control-size);
+  height: var(--icon-control-size);
   padding: 0;
-  border-radius: 50%;
+  border-radius: var(--r-sm);
 }
 
 .setting-info-button:hover,
@@ -135,8 +146,8 @@ onBeforeUnmount(() => window.removeEventListener(INFO_OPEN_EVENT, hideWhenAnothe
 }
 
 .setting-info-close {
-  width: 25px;
-  height: 25px;
+  width: var(--icon-control-size);
+  height: var(--icon-control-size);
   padding: 0;
   border: 0;
   border-radius: var(--r-sm);
@@ -153,13 +164,13 @@ onBeforeUnmount(() => window.removeEventListener(INFO_OPEN_EVENT, hideWhenAnothe
   width: min(360px, calc(100vw - 48px));
   overflow-y: auto;
   display: block;
-  padding: 12px;
+  padding: 10px;
   background: var(--surface);
   color: var(--text);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
-  box-shadow: 0 10px 26px rgb(0 0 0 / 0.18);
-  font-size: 12px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.12);
+  font-size: 14px;
   font-weight: 400;
   line-height: 1.5;
   text-align: left;
@@ -170,7 +181,7 @@ onBeforeUnmount(() => window.removeEventListener(INFO_OPEN_EVENT, hideWhenAnothe
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .setting-info-title strong {
@@ -200,7 +211,7 @@ onBeforeUnmount(() => window.removeEventListener(INFO_OPEN_EVENT, hideWhenAnothe
 }
 
 .setting-info-content :deep(code) {
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .setting-info-content :deep(.info-note) {

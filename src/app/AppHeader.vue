@@ -39,8 +39,8 @@ const emit = defineEmits<{
       <button
         :class="['bar-icon', { on: settingsOpen }]"
         :aria-pressed="settingsOpen"
-        aria-label="Settings: API & documentation"
-        title="Settings: API & documentation"
+        aria-label="Settings"
+        title="Settings"
         :disabled="!inApp"
         @click="emit('toggle-settings')"
       >
@@ -50,7 +50,7 @@ const emit = defineEmits<{
 
     <div class="statusline">
       <template v-if="!inApp">
-        <span class="status"><i class="dot idle"></i>NOT IN APP</span>
+        <span class="status status-not-in-app"><i class="dot idle"></i>Not in app</span>
       </template>
       <template v-else>
         <button
@@ -63,10 +63,10 @@ const emit = defineEmits<{
           <i
             :class="[
               'dot',
-              !bridgeEnabled ? 'idle' : serverState === 'ok' ? 'on' : serverState === 'error' ? 'fail' : 'idle',
+              !bridgeEnabled ? 'idle' : serverState === 'ok' ? 'ok' : serverState === 'error' ? 'fail' : 'idle',
             ]"
           ></i>
-          {{
+          <span>{{
             !bridgeEnabled
               ? "BRIDGE OFF"
               : serverState === "ok"
@@ -74,31 +74,30 @@ const emit = defineEmits<{
                 : serverState === "error"
                   ? "BRIDGE FAILED"
                   : "STARTING"
-          }}
+          }}</span>
         </button>
-        <span class="sep" aria-hidden="true">/</span>
-        <span v-if="ipState === 'loading' && config?.lan_access !== false" class="skeleton">LOADING ADDRESS</span>
-        <button
-          v-else
-          class="addr"
-          :title="
-            config?.lan_access === false
-              ? 'Copy the local bridge address'
-              : ipState === 'ok'
-                ? 'Copy the address for a web app'
-                : 'Not connected to a network: only accessible from this computer'
-          "
-          @click="emit('copy', address)"
-        >
-          {{ address }}<Copy :size="11" />
-        </button>
-        <span v-if="ipState === 'none' && config?.lan_access !== false" class="warn-note">OFFLINE</span>
-        <template v-if="config">
-          <span class="sep" aria-hidden="true">/</span>
-          <span :class="{ 'warn-note': !config.require_token }">
-            {{ config.require_token ? "TOKEN REQUIRED" : "TOKEN OPTIONAL" }}
-          </span>
-        </template>
+        <div class="address-status">
+          <span v-if="ipState === 'loading' && config?.lan_access !== false" class="address-loading skeleton">Loading address…</span>
+          <button
+            v-else
+            class="addr"
+            :aria-label="`Copy bridge address: ${address}`"
+            :title="
+              config?.lan_access === false
+                ? 'Copy the local bridge address'
+                : ipState === 'ok'
+                  ? 'Copy the address for a web app'
+                  : 'Not connected to a network: only accessible from this computer'
+            "
+            @click="emit('copy', address)"
+          >
+            <span class="addr-value">{{ address }}</span><Copy :size="12" aria-hidden="true" />
+          </button>
+          <span v-if="ipState === 'none' && config?.lan_access !== false" class="warn-note">Offline</span>
+        </div>
+        <span v-if="config" :class="['token-status', { 'warn-note': !config.require_token }]">
+          {{ config.require_token ? "Token required" : "Token optional" }}
+        </span>
       </template>
     </div>
   </header>

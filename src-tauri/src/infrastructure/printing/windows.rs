@@ -4,14 +4,14 @@ use self::shared::{on_spooler_thread, PrinterHandle};
 use crate::domain::printer::{JobState, Printer, PrinterQueue, QueueJob};
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 use windows::Win32::Graphics::Printing::{
-    EnumJobsW, EnumPrintersW, GetDefaultPrinterW, GetPrinterW, JOB_INFO_1W, JOB_STATUS_BLOCKED_DEVQ,
-    JOB_STATUS_COMPLETE, JOB_STATUS_DELETED, JOB_STATUS_DELETING, JOB_STATUS_ERROR, JOB_STATUS_OFFLINE,
-    JOB_STATUS_PAPEROUT, JOB_STATUS_PAUSED, JOB_STATUS_PRINTED, JOB_STATUS_PRINTING, JOB_STATUS_USER_INTERVENTION,
-    PRINTER_ATTRIBUTE_SHARED, PRINTER_ENUM_CONNECTIONS, PRINTER_ENUM_LOCAL, PRINTER_INFO_2W, PRINTER_STATUS_DOOR_OPEN,
-    PRINTER_STATUS_ERROR, PRINTER_STATUS_NOT_AVAILABLE, PRINTER_STATUS_NO_TONER, PRINTER_STATUS_OFFLINE,
-    PRINTER_STATUS_OUT_OF_MEMORY, PRINTER_STATUS_PAPER_JAM, PRINTER_STATUS_PAPER_OUT, PRINTER_STATUS_PAPER_PROBLEM,
-    PRINTER_STATUS_PAUSED, PRINTER_STATUS_PRINTING, PRINTER_STATUS_SERVER_OFFLINE, PRINTER_STATUS_TONER_LOW,
-    PRINTER_STATUS_USER_INTERVENTION,
+    EnumJobsW, EnumPrintersW, GetDefaultPrinterW, GetPrinterW, SetJobW, JOB_CONTROL_DELETE, JOB_INFO_1W,
+    JOB_STATUS_BLOCKED_DEVQ, JOB_STATUS_COMPLETE, JOB_STATUS_DELETED, JOB_STATUS_DELETING, JOB_STATUS_ERROR,
+    JOB_STATUS_OFFLINE, JOB_STATUS_PAPEROUT, JOB_STATUS_PAUSED, JOB_STATUS_PRINTED, JOB_STATUS_PRINTING,
+    JOB_STATUS_USER_INTERVENTION, PRINTER_ATTRIBUTE_SHARED, PRINTER_ENUM_CONNECTIONS, PRINTER_ENUM_LOCAL,
+    PRINTER_INFO_2W, PRINTER_STATUS_DOOR_OPEN, PRINTER_STATUS_ERROR, PRINTER_STATUS_NOT_AVAILABLE,
+    PRINTER_STATUS_NO_TONER, PRINTER_STATUS_OFFLINE, PRINTER_STATUS_OUT_OF_MEMORY, PRINTER_STATUS_PAPER_JAM,
+    PRINTER_STATUS_PAPER_OUT, PRINTER_STATUS_PAPER_PROBLEM, PRINTER_STATUS_PAUSED, PRINTER_STATUS_PRINTING,
+    PRINTER_STATUS_SERVER_OFFLINE, PRINTER_STATUS_TONER_LOW, PRINTER_STATUS_USER_INTERVENTION,
 };
 
 mod capabilities;
@@ -185,9 +185,23 @@ fn queue_impl(printer: &str) -> Result<PrinterQueue, String> {
     })
 }
 
-/// Windows drops finished jobs from the queue (unless "keep printed documents" is on).
+/// A missing queue entry may have printed, failed, or been cancelled. Windows
+/// does not provide enough evidence here to claim completion.
 pub fn was_completed(_printer: &str, _spooler_job: &str) -> bool {
-    true
+    false
+}
+
+pub fn cancel(printer: &str, spooler_job: &str) -> Result<(), String> {
+    let name = HSTRING::from(printer);
+    let id = spooler_job
+        .parse::<u32>()
+        .map_err(|_| "Invalid Windows spooler job ID")?;
+    on_spooler_thread(move || {
+        let handle = PrinterHandle::open(&name)?;
+        unsafe { SetJobW(handle.0, id, 0, None, JOB_CONTROL_DELETE) }
+            .ok()
+            .map_err(|error| format!("Could not cancel job: {}", error))
+    })?
 }
 
 pub fn os_default_printer() -> Option<String> {

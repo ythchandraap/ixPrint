@@ -156,6 +156,8 @@ pub struct ImportPreview {
     pub default_printer: Option<String>,
     pub default_printer_missing: bool,
     pub default_preset: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle_sha256: Option<String>,
 }
 
 pub fn preview_import(bundle: &PresetBundle, config: &Config, installed: &[String]) -> ImportPreview {
@@ -174,6 +176,7 @@ pub fn preview_import(bundle: &PresetBundle, config: &Config, installed: &[Strin
         default_printer: bundle.default_printer.clone(),
         default_printer_missing: missing(&bundle.default_printer),
         default_preset: bundle.default_preset.clone(),
+        bundle_sha256: None,
     }
 }
 
@@ -219,6 +222,7 @@ pub fn apply_import(
     if options.replace_all {
         config.presets.clear();
         config.default_preset = None;
+        config.shared_presets.clear();
     }
 
     let mut imported = Vec::new();
@@ -234,7 +238,10 @@ pub fn apply_import(
 
         let target = match action {
             ImportAction::Skip => continue,
-            ImportAction::Overwrite => name.clone(),
+            ImportAction::Overwrite => {
+                config.shared_presets.remove(name);
+                name.clone()
+            }
             ImportAction::Rename => match decision.and_then(|d| d.new_name.clone()) {
                 Some(n) => {
                     validate_preset_name(&n)?;

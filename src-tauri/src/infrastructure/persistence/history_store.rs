@@ -105,14 +105,15 @@ impl History {
         Ok(entries)
     }
 
-    /// Looks up a job by ix.print job id in today's and yesterday's history.
+    /// Looks up a job by ix.print job id across retained history.
     pub fn find(&self, job_id: &str) -> Option<HistoryEntry> {
-        let today = chrono::Local::now().date_naive();
-        [today, today - chrono::Duration::days(1)]
-            .iter()
-            .filter_map(|d| self.read_day(&d.format("%Y-%m-%d").to_string()).ok())
+        let mut dates: Vec<_> = self.day_files().into_iter().map(|(date, _)| date).collect();
+        dates.sort_unstable_by(|a, b| b.cmp(a));
+        dates
+            .into_iter()
+            .filter_map(|date| self.read_day(&date).ok())
             .flatten()
-            .find(|e| e.id == job_id)
+            .find(|entry| entry.id == job_id)
     }
 
     /// `per_page` entries of `date`; `failed_only` keeps only failed jobs.
@@ -137,6 +138,36 @@ impl History {
         let entries = list.into_iter().skip((page - 1) * per_page).take(per_page).collect();
         Ok(HistoryPage {
             entries,
+            total,
+            failed,
+            page,
+            pages,
+            per_page,
+        })
+    }
+
+    pub fn search(&self, query: &str, page: usize, per_page: usize) -> Result<HistoryPage, String> {
+        let query = query.trim();
+        if query.chars().count() < 3 || query.chars().count() > 128 {
+            return Err("Search must contain 3–128 characters".into());
+        }
+        let mut matches = Vec::new();
+        let mut dates: Vec<_> = self.day_files().into_iter().map(|(date, _)| date).collect();
+        dates.sort_unstable_by(|a, b| b.cmp(a));
+        for date in dates {
+            matches.extend(
+                self.read_day(&date)?
+                    .into_iter()
+                    .filter(|entry| entry.matches_query(query)),
+            );
+        }
+        let per_page = per_page.clamp(1, 200);
+        let pages = matches.len().div_ceil(per_page).max(1);
+        let page = page.clamp(1, pages);
+        let total = matches.len();
+        let failed = matches.iter().filter(|entry| !entry.success).count();
+        Ok(HistoryPage {
+            entries: matches.into_iter().skip((page - 1) * per_page).take(per_page).collect(),
             total,
             failed,
             page,
@@ -205,6 +236,10 @@ impl HistoryRepository for History {
 
     fn read_page(&self, date: &str, page: usize, per_page: usize, failed_only: bool) -> Result<HistoryPage, String> {
         History::read_page(self, date, page, per_page, failed_only)
+    }
+
+    fn search(&self, query: &str, page: usize, per_page: usize) -> Result<HistoryPage, String> {
+        History::search(self, query, page, per_page)
     }
 
     fn days(&self) -> Vec<HistoryDay> {

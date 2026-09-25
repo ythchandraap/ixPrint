@@ -1,5 +1,5 @@
 use super::element::{Element, MAX_ELEMENTS, MAX_SIZE_MM, MIN_SIZE_MM};
-use super::record::{placeholders, Record};
+use super::record::{fill, placeholders, Record};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -55,6 +55,9 @@ pub struct Template {
     /// Example data for the editor preview and test prints.
     #[serde(default)]
     pub sample: Record,
+    /// Fields that must have a value in each record or the shared header.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_fields: Vec<String>,
 }
 
 impl Template {
@@ -69,6 +72,12 @@ impl Template {
         }
         for (i, el) in self.elements.iter().enumerate() {
             el.check().map_err(|e| format!("elemen #{}: {}", i + 1, e))?;
+        }
+        let available = self.fields();
+        for field in &self.required_fields {
+            if !available.contains(field) {
+                return Err(format!("Required field '{}' is not used by this design", field));
+            }
         }
         if let Layout::List {
             header_mm,
@@ -109,6 +118,49 @@ impl Template {
         Ok(())
     }
 
+    /// Checks values before any job reaches the printer. Legacy designs have
+    /// no required fields, so their optional placeholders still print empty.
+    pub fn preflight(&self, records: &[Record], header: &Record) -> Result<(), String> {
+        match self.preflight_errors(records, header).into_iter().next() {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
+    /// Returns the first 50 issues so integrations can fix a batch at once.
+    pub fn preflight_errors(&self, records: &[Record], header: &Record) -> Vec<String> {
+        if let Err(error) = self.validate() {
+            return vec![error];
+        }
+        if records.is_empty() {
+            return vec!["data must contain at least one record".into()];
+        }
+        let mut errors = Vec::new();
+        for (index, record) in records.iter().enumerate() {
+            for field in &self.required_fields {
+                let value = record.get(field).or_else(|| header.get(field));
+                if value.is_none_or(|value| value.trim().is_empty()) {
+                    errors.push(format!("data[{}].{} is required", index + 1, field));
+                }
+            }
+            let mut values = header.clone();
+            values.extend(record.clone());
+            for element in &self.elements {
+                if let Element::Barcode { value, .. } = element {
+                    let filled = fill(value, &values);
+                    if !filled.bytes().all(|byte| (32..=126).contains(&byte)) {
+                        errors.push(format!("data[{}]: barcode must contain printable ASCII", index + 1));
+                    }
+                }
+            }
+            if errors.len() >= 50 {
+                errors.truncate(50);
+                break;
+            }
+        }
+        errors
+    }
+
     /// Placeholder names clients should send, sorted; excludes the fields ix.print
     /// fills in itself ({{no}}, {{halaman}}, ...), see [`Template::auto_fields`].
     pub fn fields(&self) -> Vec<String> {
@@ -132,5 +184,33 @@ impl Template {
             }
         }
         out.into_iter().collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preflight_requires_configured_fields_and_checks_barcode_values() {
+        let mut design: Template = serde_json::from_value(serde_json::json!({
+            "width_mm": 60,
+            "height_mm": 40,
+            "elements": [{"type": "barcode", "x": 1, "y": 1, "w": 30, "h": 10, "value": "{{kode}}"}],
+            "required_fields": ["kode"]
+        }))
+        .unwrap();
+        let data = |value: &str| Record::from([("kode".into(), value.into())]);
+        assert!(design.preflight(&[data("A-123")], &Record::new()).is_ok());
+        assert!(design
+            .preflight(&[Record::new()], &Record::new())
+            .unwrap_err()
+            .contains("data[1].kode"));
+        assert!(design
+            .preflight(&[data("é")], &Record::new())
+            .unwrap_err()
+            .contains("ASCII"));
+        design.required_fields = vec!["unknown".into()];
+        assert!(design.validate().unwrap_err().contains("not used"));
     }
 }

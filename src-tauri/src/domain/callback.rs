@@ -15,9 +15,11 @@ pub(crate) const MAX_URL: usize = 2048;
 pub(crate) static ALLOW_LOOPBACK_FOR_TESTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Where and how to report one job.
+#[derive(Clone)]
 pub struct Callback {
     pub(crate) url: String,
     pub(crate) reference: Option<String>,
+    pub(crate) token_id: String,
     /// HMAC key: the token's stored hash (the client computes it from its token).
     pub(crate) key: String,
 }
@@ -42,6 +44,7 @@ impl Callback {
         Ok(Some(Callback {
             url: url.to_string(),
             reference: reference.map(str::to_string),
+            token_id: token.id.clone(),
             key: token.hash.clone(),
         }))
     }
@@ -103,7 +106,7 @@ pub struct Payload {
     pub event: &'static str,
     pub job_id: String,
     pub reference: Option<String>,
-    /// Printed (`true`) or not (`false`); `null` for `job.problem`.
+    /// Spooler completion (`true`), known failure (`false`), or unknown outcome (`null`).
     pub success: Option<bool>,
     /// completed | sent | failed | gone | timeout | error
     pub state: String,

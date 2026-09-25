@@ -263,16 +263,18 @@ async function removeFromMenu() {
               <MoreHorizontal :size="16" />
               <span>Actions</span>
             </button>
-            <div v-if="actionsOpen" class="action-popover" role="menu">
-              <button type="button" class="menu-action" :disabled="busy" role="menuitem" @click="makeOsDefaultFromMenu">
-                <Star :size="16" />
-                <span>Set as system default</span>
-              </button>
-              <button type="button" class="menu-action danger" :disabled="busy" role="menuitem" @click="removeFromMenu">
-                <Trash2 :size="16" />
-                <span>Remove printer</span>
-              </button>
-            </div>
+            <Transition name="popover">
+              <div v-if="actionsOpen" class="action-popover" role="menu">
+                <button type="button" class="menu-action" :disabled="busy" role="menuitem" @click="makeOsDefaultFromMenu">
+                  <Star :size="16" />
+                  <span>Set as system default</span>
+                </button>
+                <button type="button" class="menu-action danger" :disabled="busy" role="menuitem" @click="removeFromMenu">
+                  <Trash2 :size="16" />
+                  <span>Remove printer</span>
+                </button>
+              </div>
+            </Transition>
           </div>
         </div>
         <div class="grid2">
@@ -310,7 +312,7 @@ async function removeFromMenu() {
           <span class="meta grow">{{
             devicesLoading ? "Searching for devices (about 8 seconds)…" : `${devices.length} found`
           }}</span>
-          <button type="button" class="icon" title="Search again" :disabled="devicesLoading" @click="loadDevices">
+          <button type="button" class="icon" title="Search again" aria-label="Search for devices again" :disabled="devicesLoading" @click="loadDevices">
             <RefreshCw :size="16" />
           </button>
         </div>
@@ -429,12 +431,13 @@ async function removeFromMenu() {
   color: var(--muted);
   padding: 7px 4px;
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
   cursor: pointer;
 }
 .segmented button.on {
   background: var(--brand-fill);
-  color: #fff;
+  color: var(--action-text);
+  box-shadow: inset 0 0 0 1px var(--brand);
 }
 .printer-name-row {
   display: flex;
@@ -458,12 +461,11 @@ async function removeFromMenu() {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
-  box-shadow: 0 6px 18px rgb(0 0 0 / 0.14);
 }
 .menu-action {
   width: 100%;
-  min-height: 34px;
-  padding: 7px 8px;
+  min-height: var(--icon-control-size);
+  padding: 6px 8px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -472,7 +474,7 @@ async function removeFromMenu() {
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
   text-align: left;
   cursor: pointer;
 }

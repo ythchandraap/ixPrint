@@ -29,6 +29,8 @@ pub enum Document {
 }
 
 pub struct JobRequest {
+    /// Preassigned by the HTTP idempotency reservation; desktop jobs generate their own.
+    pub job_id: Option<String>,
     pub document: Document,
     pub file_name: String,
     pub settings: PrintSettings,

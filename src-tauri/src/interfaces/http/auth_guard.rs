@@ -14,6 +14,18 @@ fn unauthorized(message: &str) -> HttpResponse {
 }
 
 pub(super) fn authorize(req: &HttpRequest, state: &AppState) -> Result<Option<auth::ApiToken>, HttpResponse> {
+    authorize_with_policy(req, state, false)
+}
+
+pub(super) fn authorize_bearer(req: &HttpRequest, state: &AppState) -> Result<auth::ApiToken, HttpResponse> {
+    authorize_with_policy(req, state, true)?.ok_or_else(|| unauthorized("A bearer token is required"))
+}
+
+fn authorize_with_policy(
+    req: &HttpRequest,
+    state: &AppState,
+    bearer_required: bool,
+) -> Result<Option<auth::ApiToken>, HttpResponse> {
     let ip = req.peer_addr().map(|a| a.ip());
     let desktop_key = req.headers().get("x-ixprint-desktop").and_then(|v| v.to_str().ok());
     if req.method() == actix_web::http::Method::POST
@@ -32,12 +44,18 @@ pub(super) fn authorize(req: &HttpRequest, state: &AppState) -> Result<Option<au
     }
     let config = state.config.get();
     let header = |name: &str| req.headers().get(name).and_then(|v| v.to_str().ok());
-    let query = web::Query::<HashMap<String, String>>::from_query(req.query_string()).ok();
-    let provided = auth::extract(
-        header("authorization"),
-        header("x-api-token"),
-        query.as_ref().and_then(|q| q.get("token")).map(String::as_str),
-    );
+    let query = (!bearer_required)
+        .then(|| web::Query::<HashMap<String, String>>::from_query(req.query_string()).ok())
+        .flatten();
+    let provided = if bearer_required {
+        auth::extract(header("authorization"), None, None)
+    } else {
+        auth::extract(
+            header("authorization"),
+            header("x-api-token"),
+            query.as_ref().and_then(|q| q.get("token")).map(String::as_str),
+        )
+    };
     match provided {
         Some(token) => match auth::find(&config.tokens, &token) {
             Some(t) => {
@@ -56,6 +74,7 @@ pub(super) fn authorize(req: &HttpRequest, state: &AppState) -> Result<Option<au
                 Err(unauthorized("Token is invalid or has been revoked"))
             }
         },
+        None if bearer_required => Err(unauthorized("A bearer token is required for this endpoint")),
         None if config.require_token && config.tokens.is_empty() => Err(unauthorized(
             "A token is required, but none exists: create one in ix.print → Settings → API",
         )),
@@ -105,3 +124,13 @@ macro_rules! authorized {
     };
 }
 pub(crate) use authorized;
+
+macro_rules! authorized_bearer {
+    ($req:expr, $state:expr) => {
+        match $crate::interfaces::http::auth_guard::authorize_bearer(&$req, &$state) {
+            Ok(token) => token,
+            Err(response) => return response,
+        }
+    };
+}
+pub(crate) use authorized_bearer;

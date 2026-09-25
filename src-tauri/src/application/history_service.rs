@@ -24,3 +24,7 @@ pub fn page(
 ) -> Result<HistoryPage, String> {
     state.history.read_page(date, page, per_page, failed_only)
 }
+
+pub fn search(state: &AppState, query: &str, page: usize, per_page: usize) -> Result<HistoryPage, String> {
+    state.history.search(query, page, per_page)
+}

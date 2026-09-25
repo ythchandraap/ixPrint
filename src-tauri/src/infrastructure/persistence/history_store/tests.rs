@@ -29,6 +29,7 @@ fn merges_latest_callback_status() {
     let job = entry(&format!("{}T08:00:00+07:00", today), true);
     h.append(&job).unwrap();
     let status = |state: &str, attempts| CallbackStatus {
+        token_id: None,
         url: "https://a.id/cb".into(),
         reference: Some("R1".into()),
         state: state.into(),
@@ -78,5 +79,39 @@ fn groups_by_day_and_prunes() {
     h.prune(30);
     assert_eq!(h.days().len(), 1);
     assert!(h.read_day("../etc").is_err());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn search_matches_job_id_and_callback_reference_across_days() {
+    let dir = std::env::temp_dir().join(format!("ixprint-search-{}", uuid::Uuid::new_v4()));
+    let history = History::new(dir.clone());
+    let first = entry("2025-01-01T08:00:00+07:00", true);
+    let second = entry("2025-01-02T09:00:00+07:00", true);
+    history.append(&first).unwrap();
+    history.append(&second).unwrap();
+    history
+        .append_callback(
+            &first.id,
+            CallbackStatus {
+                token_id: None,
+                url: "https://example.com/cb".into(),
+                reference: Some("ORDER-123".into()),
+                state: "delivered".into(),
+                result: Some("completed".into()),
+                attempts: 1,
+                http_status: Some(200),
+                error: None,
+                time: first.time.clone(),
+            },
+        )
+        .unwrap();
+    let by_ref = history.search("order-123", 1, 20).unwrap();
+    assert_eq!(by_ref.total, 1);
+    assert_eq!(by_ref.entries[0].id, first.id);
+    let by_id = history.search(&second.id[..8], 1, 20).unwrap();
+    assert_eq!(by_id.total, 1);
+    assert_eq!(by_id.entries[0].id, second.id);
+    assert!(history.search("a", 1, 20).is_err());
     let _ = fs::remove_dir_all(dir);
 }

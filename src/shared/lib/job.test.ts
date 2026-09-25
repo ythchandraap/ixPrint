@@ -12,8 +12,8 @@ describe("describeJob", () => {
 		["printing", "Printing"],
 		["paused", "Held / paused"],
 		["error", "Error: printer issue"],
-		["completed", "Printed successfully"],
-		["gone", "No longer in the queue"],
+  ["completed", "Spooler reports completed"],
+  ["gone", "Left the queue; print outcome unknown"],
 	] as const)("describes %s", (state, expected) => {
 		expect(describeJob({ state })).toBe(expected);
 	});

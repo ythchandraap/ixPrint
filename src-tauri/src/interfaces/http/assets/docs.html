@@ -6,59 +6,88 @@
 <title>ix.print API</title>
 <style>
 :root {
-	--bg: #f5f5f5;
-	--surface: #ffffff;
-	--text: #1f2937;
-	--muted: #6b7280;
-	--line: #e5e7eb;
-	--brand: oklch(62.3% 0.214 259.815);
-	--brand-soft: oklch(88.2% 0.059 254.128);
-	--brand-ink: oklch(37.9% 0.146 265.522);
-	--code-bg: #0f172a;
-	--code-text: #e2e8f0;
-	--ok: #16a34a;
-	--warn: #b45309;
-	--danger: #dc2626;
-	--get: #0e7490;
-	--post: #7c3aed;
+	--obsidian: #111214;
+	--graphite: #1b1d20;
+	--carbon: #24262a;
+	--ivory: #f2f1ed;
+	--steel: #9b9ea4;
+	--border-dark: #2b2e33;
+	--acid-yellow: #efff2a;
+	--bg: var(--ivory);
+	--surface: #fbfbf9;
+	--text: var(--obsidian);
+	--muted: #5e646e;
+	--line: #dad8d2;
+	--border-control: #737b87;
+	--brand: #4f5900;
+	--brand-fill: var(--acid-yellow);
+	--brand-soft: #f2f4d6;
+	--brand-ink: #4f5900;
+	--brand-pale: #f2f4d6;
+	--action-text: var(--obsidian);
+	--action-hover: #ddeb1d;
+	--code-bg: var(--graphite);
+	--code-text: var(--ivory);
+	--ok: #1f7a4d;
+	--ok-soft: #e3f1e9;
+	--warn: #9a5b00;
+	--danger: #c2382b;
+	--danger-soft: #f9e6e3;
+	--r-sm: 4px;
+	--r-md: 6px;
+	--r-lg: 8px;
 	color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
 	:root {
-		--bg: #18181b;
-		--surface: #27272a;
-		--text: #f4f4f5;
-		--muted: #a1a1aa;
-		--line: #3f3f46;
-		--brand-soft: oklch(32% 0.08 260);
-		--brand-ink: oklch(90% 0.05 255);
-		--code-bg: #0b1020;
+		--bg: var(--obsidian);
+		--surface: var(--graphite);
+		--text: var(--ivory);
+		--muted: var(--steel);
+		--line: var(--border-dark);
+		--border-control: #777f8c;
+		--brand: var(--acid-yellow);
+		--brand-fill: var(--acid-yellow);
+		--brand-soft: #303511;
+		--brand-ink: var(--acid-yellow);
+		--brand-pale: #303511;
+		--action-text: var(--obsidian);
+		--action-hover: #ddeb1d;
+		--ok: #5cc28e;
+		--ok-soft: #142a1f;
+		--warn: #e0a84a;
+		--danger: #f07a6c;
+		--danger-soft: #2e1714;
 		color-scheme: dark;
 	}
 }
 * { box-sizing: border-box; }
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 body {
 	margin: 0;
-	font: 15px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+	font: 14px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 	background: var(--bg);
 	color: var(--text);
 }
 a { color: var(--brand); }
-code, pre, .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+code, pre, .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; line-height: 19px; }
 header {
-	background: var(--brand-soft);
+	background: var(--obsidian);
+	color: var(--ivory);
+	border-bottom: 1px solid var(--carbon);
 	padding: 20px 24px;
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
 	gap: 12px 24px;
 }
-header h1 { margin: 0; color: var(--brand-ink); font-size: 22px; }
+header h1 { margin: 0; color: var(--ivory); font-size: 20px; line-height: 28px; }
+header .note { color: var(--steel); }
 header .base { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-header .base code { background: var(--surface); padding: 4px 8px; border-radius: 6px; }
+header .base code { background: var(--carbon); color: var(--ivory); padding: 4px 8px; border-radius: var(--r-sm); }
 header .token-box { margin-left: auto; }
 header .token-box input { width: 280px; background: var(--surface); }
-header .token-box button { padding: 5px 10px; font-size: 13px; }
+header .token-box button { padding: 5px 10px; font-size: 14px; }
 .layout { display: flex; max-width: 1200px; margin: 0 auto; }
 nav {
 	width: 220px;
@@ -75,37 +104,39 @@ nav a {
 	gap: 8px;
 	align-items: center;
 	padding: 5px 8px;
-	border-radius: 6px;
+	min-height: 44px;
+	border-radius: var(--r-sm);
 	text-decoration: none;
 	color: var(--text);
 	font-size: 14px;
+	line-height: 21px;
 }
 nav a:hover { background: var(--surface); }
-nav .group { font-size: 12px; font-weight: 600; color: var(--muted); margin: 14px 8px 4px; text-transform: uppercase; }
+nav .group { font-size: 12px; line-height: 18px; font-weight: 600; color: var(--muted); margin: 14px 8px 4px; text-transform: uppercase; }
 main { flex: 1; min-width: 0; padding: 20px 24px 80px; }
 section { margin-bottom: 36px; scroll-margin-top: 12px; }
-h2 { font-size: 20px; margin: 0 0 8px; }
-h3 { font-size: 15px; margin: 18px 0 6px; }
+h2 { font-size: 18px; line-height: 26px; margin: 0 0 8px; }
+h3 { font-size: 16px; line-height: 24px; margin: 18px 0 6px; }
 p { margin: 6px 0; }
 .card {
 	background: var(--surface);
 	border: 1px solid var(--line);
-	border-radius: 12px;
+	border-radius: var(--r-lg);
 	padding: 16px 18px;
 }
 .endpoint-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .method {
-	font: 600 12px ui-monospace, Menlo, Consolas, monospace;
+	font: 600 12px/18px ui-monospace, Menlo, Consolas, monospace;
 	padding: 2px 8px;
-	border-radius: 6px;
-	color: #fff;
+	border-radius: var(--r-sm);
+	color: var(--brand);
+	background: var(--brand-pale);
 }
-.method.GET { background: var(--get); }
-.method.POST { background: var(--post); }
-.path { font-size: 15px; font-weight: 600; }
-table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.method.POST { background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--text); }
+.path { font-size: 16px; line-height: 24px; font-weight: 600; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; line-height: 21px; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-th { font-size: 12px; color: var(--muted); font-weight: 600; }
+th { font-size: 12px; line-height: 18px; color: var(--muted); font-weight: 600; }
 td code { white-space: nowrap; }
 .table-wrap { overflow-x: auto; }
 .try {
@@ -114,36 +145,43 @@ td code { white-space: nowrap; }
 	padding-top: 14px;
 }
 .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
-.field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); min-width: 0; }
+.field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; line-height: 19px; color: var(--muted); min-width: 0; }
 .field.wide { grid-column: 1 / -1; }
 input, select {
 	font: inherit;
 	font-size: 14px;
+	line-height: 21px;
 	color: var(--text);
 	background: var(--bg);
-	border: 1px solid var(--line);
-	border-radius: 8px;
+	border: 1px solid var(--border-control);
+	border-radius: var(--r-md);
 	padding: 6px 8px;
+	min-height: 44px;
 	width: 100%;
 	min-width: 0;
 }
-input:focus, select:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
-details.more > summary { cursor: pointer; font-size: 13px; color: var(--brand); margin: 10px 0 6px; }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+details.more > summary { cursor: pointer; font-size: 14px; color: var(--brand); margin: 10px 0 6px; min-height: 44px; }
 .actions { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
 button {
 	font: inherit;
 	font-weight: 500;
-	border-radius: 8px;
+	line-height: 21px;
+	border-radius: var(--r-md);
 	padding: 7px 16px;
+	min-height: 44px;
+	font-size: 14px;
 	cursor: pointer;
 	border: 1px solid var(--brand);
-	background: var(--brand);
-	color: #fff;
+	background: var(--brand-fill);
+	color: var(--action-text);
 }
-button.ghost { background: var(--surface); color: var(--text); border-color: var(--line); }
+button:hover:not(:disabled):not(.ghost):not(.copy):not([data-tab]) { background: var(--action-hover); border-color: var(--brand); }
+button.ghost, button.copy { background: var(--surface); color: var(--text); border-color: var(--border-control); }
+button.ghost:hover:not(:disabled), button.copy:hover:not(:disabled) { border-color: var(--muted); }
 button:disabled { opacity: 0.5; cursor: default; }
 .response { margin-top: 12px; }
-.response .meta { font-size: 13px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+.response .meta { font-size: 13px; line-height: 19px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
 .status-ok { color: var(--ok); font-weight: 600; }
 .status-err { color: var(--danger); font-weight: 600; }
 pre {
@@ -160,29 +198,56 @@ pre {
 	padding: 8px 12px;
 	border-radius: 8px;
 	font-size: 14px;
+	line-height: 21px;
 	background: var(--brand-soft);
 	color: var(--brand-ink);
 }
-.job.error, .job.failed { background: #fef2f2; color: var(--danger); }
-.job.completed { background: #dcfce7; color: #166534; }
+.job.error, .job.failed { background: var(--danger-soft); color: var(--danger); }
+.job.completed { background: var(--ok-soft); color: var(--ok); }
 .tabs { display: flex; gap: 4px; margin-top: 14px; }
 .tabs button { background: none; border: none; color: var(--muted); padding: 4px 10px; border-bottom: 2px solid transparent; border-radius: 0; }
 .tabs button.on { color: var(--brand); border-bottom-color: var(--brand); }
-.copy { float: right; font-size: 12px; padding: 2px 8px; }
+.copy { float: right; font-size: 14px; line-height: 21px; padding: 2px 8px; }
 textarea.json-body {
-	font: 13px ui-monospace, Menlo, Consolas, monospace;
+	font: 13px/19px ui-monospace, Menlo, Consolas, monospace;
 	color: var(--text);
 	background: var(--bg);
-	border: 1px solid var(--line);
+	border: 1px solid var(--border-control);
 	border-radius: 8px;
 	padding: 8px;
 	width: 100%;
 	resize: vertical;
 }
-.note { font-size: 13px; color: var(--muted); }
-.badge { font-size: 11px; padding: 1px 6px; border-radius: 999px; background: var(--line); color: var(--text); }
+.note { font-size: 13px; line-height: 19px; color: var(--muted); }
+.badge { font-size: 12px; line-height: 18px; padding: 1px 6px; border-radius: var(--r-sm); background: var(--brand-pale); color: var(--brand); }
+@media (any-pointer: coarse) {
+	input,
+	select,
+	textarea.json-body {
+		font-size: 16px;
+		line-height: 24px;
+	}
+	main p {
+		font-size: 16px;
+		line-height: 24px;
+	}
+}
 @media (max-width: 800px) {
-	nav { display: none; }
+	.layout { display: block; }
+	nav {
+		display: flex;
+		width: auto;
+		gap: 4px;
+		padding: 8px 16px;
+		position: sticky;
+		z-index: 5;
+		top: 0;
+		max-height: none;
+		background: var(--bg);
+		border-bottom: 1px solid var(--line);
+	}
+	nav a { flex: none; }
+	nav .group { display: none; }
 	main { padding: 16px; }
 	header { padding: 16px; }
 }
@@ -208,6 +273,7 @@ textarea.json-body {
 		<div class="group">Guide</div>
 		<a href="#intro">Introduction</a>
 		<a href="#auth">Authentication</a>
+		<a href="#preset-sharing">Share presets over LAN</a>
 		<a href="#settings">Print parameters</a>
 		<a href="#jobstatus">Job status</a>
 		<a href="#callback">Print result callback</a>
@@ -248,6 +314,25 @@ X-Api-Token: fxp_…
 ?token=fxp_…      // convenient, but recorded in logs and browser history</pre>
 				<p class="note">Fill in the <b>Token</b> field above so the "Try it" buttons and code examples on this page use your token. The token is stored only in this browser.
 				Do not put a token in public-page JavaScript; keep it on your web app's server where possible.</p>
+				<p class="note"><code>GET /presets/shared</code> and <code>GET /presets/shared/export</code> always require a valid bearer token, even when <b>Require a token</b> is off. They do not accept <code>X-Api-Token</code> or a query token. Shared preset listing is separately controlled in the Presets tab and is off by default. The older <code>/presets</code> and <code>/presets/export</code> endpoints retain their existing behavior and token methods.</p>
+			</div>
+		</section>
+
+		<section id="preset-sharing">
+			<h2>Share presets over LAN</h2>
+			<div class="card">
+				<p>In the Presets tab, turn on <b>Share on LAN</b> for a published preset. Its published settings, design and sample data are available to a computer with an API token. <b>Allow listing shared presets via API</b> is separate and defaults to off; when off, the receiver needs the exact preset name. Drafts, previous versions and defaults are never included.</p>
+				<p>List shared preset names (bearer token required):</p>
+				<pre>curl -H "Authorization: Bearer fxp_…" "http://192.168.1.10:18032/presets/shared"
+
+// 200
+{"presets":[{"name":"Label Produk","has_design":true},{"name":"Struk","has_design":false}]}</pre>
+				<p>Fetch one published preset, even when listing is disabled. The name is URL-encoded and the token stays in the header:</p>
+				<pre>curl -H "Authorization: Bearer fxp_…" "http://192.168.1.10:18032/presets/shared/export?name=Label%20Produk"
+
+// 200
+{"format":"ixprint-presets","version":2,"exported_at":"","presets":{"Label Produk":{"paper":"A4","design":{"width_mm":60,"height_mm":40,"elements":[],"sample":{"sku":"A1"}}}}}</pre>
+				<p class="note">Both endpoints always require a valid bearer token, even when Require a token is off. They do not use query tokens or <code>X-Api-Token</code> for authentication. Existing <code>GET /presets</code> and <code>GET /presets/export</code> retain their original responses and authentication behavior.</p>
 			</div>
 		</section>
 
@@ -270,12 +355,12 @@ X-Api-Token: fxp_…
 						<tr><td><code>printing</code></td><td>Printing.</td></tr>
 						<tr><td><code>paused</code></td><td>Held / queue paused.</td></tr>
 						<tr><td><code>error</code></td><td>The job or printer has a problem (out of paper, jam, offline…); see <code>message</code> / <code>printer_message</code>. It may continue after the problem is fixed.</td></tr>
-						<tr><td><code>completed</code></td><td>Printed successfully.</td></tr>
+						<tr><td><code>completed</code></td><td>Spooler reports completion.</td></tr>
 						<tr><td><code>gone</code></td><td>Left the queue without a known result (e.g. cancelled).</td></tr>
 						<tr><td><code>failed</code></td><td>ix.print could not send the job; <code>message</code> explains why.</td></tr>
 					</tbody>
 				</table></div>
-				<p class="note">Poll every 2–3 seconds until <code>completed</code>, <code>gone</code> or <code>failed</code>. Jobs are looked up in today's and yesterday's history.</p>
+				<p class="note">Poll every 2–3 seconds until <code>completed</code>, <code>gone</code> or <code>failed</code>. Live queue status is available for recent jobs; older jobs remain in retained History.</p>
 			</div>
 		</section>
 
@@ -299,11 +384,11 @@ X-Api-Token: fxp_…
 				<div class="table-wrap"><table>
 					<thead><tr><th>state</th><th>success</th><th>Meaning</th></tr></thead>
 					<tbody>
-						<tr><td><code>completed</code></td><td>true</td><td>Printed successfully.</td></tr>
-						<tr><td><code>sent</code></td><td>true</td><td>Sent to the printer; the spooler did not report the job status.</td></tr>
+						<tr><td><code>completed</code></td><td>true</td><td>Spooler reports completion.</td></tr>
+						<tr><td><code>sent</code></td><td>null</td><td>Sent to the printer; the spooler did not report the job status.</td></tr>
 						<tr><td><code>failed</code></td><td>false</td><td>ix.print could not send the job; see <code>message</code>.</td></tr>
-						<tr><td><code>gone</code></td><td>false</td><td>Left the queue without completing (e.g. cancelled).</td></tr>
-						<tr><td><code>timeout</code></td><td>false</td><td>Not completed after 60 minutes.</td></tr>
+						<tr><td><code>gone</code></td><td>null</td><td>Left the queue without a known outcome (e.g. cancelled).</td></tr>
+						<tr><td><code>timeout</code></td><td>null</td><td>No final report after 60 minutes.</td></tr>
 					</tbody>
 				</table></div>
 				<p>If the printer has a problem (out of paper, jam, offline) before completion, one <code>"event": "job.problem"</code> is sent with <code>"state": "error"</code>, <code>"success": null</code> and <code>message</code>; <code>job.finished</code> still follows.
@@ -412,6 +497,18 @@ const ENDPOINTS = [
 		params: [],
 	},
 	{
+		id: "presets-shared", group: "Preset", method: "GET", path: "/presets/shared", title: "List shared presets",
+		desc: "Names and <code>has_design</code> flags for published presets explicitly shared over LAN. Requires a bearer token. The optional listing setting is off by default; when disabled this returns 403. No preset contents or sample data are included.",
+		params: [],
+		example: '{"presets":[{"name":"Label Produk","has_design":true},{"name":"Struk","has_design":false}]}',
+	},
+	{
+		id: "presets-shared-export", group: "Preset", method: "GET", path: "/presets/shared/export", title: "Get one shared preset",
+		desc: "Fetch one published preset marked Share on LAN as an importable bundle. Requires a bearer token even when token protection is off. The bundle contains exactly one preset and no defaults, drafts or previous versions.",
+		params: [{ name: "name", kind: "text", placeholder: "Label Produk", values: "published preset name", def: "required" }],
+		example: '{"format":"ixprint-presets","version":2,"exported_at":"","presets":{"Label Produk":{"paper":"A4"}}}',
+	},
+	{
 		id: "templates", group: "Preset", method: "GET", path: "/templates", title: "Designed presets",
 		desc: "Presets with a design, including the <code>fields</code> that must be sent and sample data. <span class=\"note\">The older <code>POST /print-template</code> endpoint with <code>{\"template\": …}</code> is still accepted and means the preset with that name.</span>",
 		params: [],
@@ -419,7 +516,7 @@ const ENDPOINTS = [
 	},
 	{
 		id: "print", group: "Print", method: "POST", path: "/print", title: "Print PDF",
-		desc: "Upload a PDF (<code>multipart/form-data</code>, first file field) with settings in the query string. The response contains <code>job_id</code> and the initial <code>status</code> (queue position). For designed presets, send JSON data — see <a href=\"#print-data\">Print data</a>.",
+		desc: "Upload a PDF (<code>multipart/form-data</code>, first file field) with settings in the query string. The response contains <code>job_id</code> and the initial <code>status</code> (queue position). For designed presets, send JSON data — see <a href=\"#print-data\">Print data</a>. Send a unique <code>Idempotency-Key</code> header per logical job; reuse it on network retries for 24 hours. A changed request with the same key returns 409.",
 		file: true,
 		params: [...CALLBACK_PARAMS, ...PRINT_PARAMS],
 		follow: true,
@@ -433,7 +530,7 @@ const ENDPOINTS = [
 	},
 	{
 		id: "print-data", group: "Print", method: "POST", path: "/print", title: "Print data (designed preset)",
-		desc: "For a preset with a <b>design</b> (a label/receipt with fields such as <code>{{nama}}</code>): send only the data as a <b>JSON body</b> (<code>Content-Type: application/json</code>). ix.print fills the design, creates a PDF matching its size, then prints it using the preset settings. <code>data</code> is an <b>array of objects</b>: in <b>Label</b> mode one object = one page; in <b>List</b> mode one object = one row below the header, continuing on the next page with the header repeated and the footer at the end (or on every page). Fields not sent are printed empty.",
+		desc: "For a preset with a <b>design</b> (a label/receipt with fields such as <code>{{nama}}</code>): send only the data as a <b>JSON body</b> (<code>Content-Type: application/json</code>). ix.print fills the design, creates a PDF matching its size, then prints it using the preset settings. <code>data</code> is an <b>array of objects</b>: in <b>Label</b> mode one object = one page; in <b>List</b> mode one object = one row below the header, continuing on the next page with the header repeated and the footer at the end (or on every page). Optional fields print empty. Send <code>Idempotency-Key</code> for safe retries.",
 		params: [],
 		json: true,
 		follow: true,
@@ -447,6 +544,12 @@ const ENDPOINTS = [
 			["(automatic fields)", "optional", "<code>{{no}}</code>, <code>{{halaman}}</code>, <code>{{total_halaman}}</code>, <code>{{jumlah_data}}</code> are filled by ix.print; send values in <code>data</code>/<code>header</code> to override them."],
 		],
 		example: '{"message":"Data sent to printer","job_id":"…","printer":"Zebra","preset":"label-produk","sheets":2,"spooler_job":"Zebra-651","status":{"state":"queued","position":1,"ahead":0}}',
+	},
+	{
+		id: "preflight", group: "Print", method: "POST", path: "/preflight", title: "Validate data without printing",
+		desc: "Send the same JSON as a designed-preset print request. Returns <code>valid</code>, <code>errors</code>, expected <code>fields</code>, <code>required_fields</code> and record count. It never sends a job to the printer.",
+		params: [], json: true,
+		bodyDocs: [["preset", "required*", "Published preset name; may be omitted when a default is set."], ["data", "required", "One object or an array of objects."], ["header", "optional", "Values shared by records."], ["settings", "optional", "Print settings to validate."]],
 	},
 	{
 		id: "job-status", group: "Print", method: "GET", path: "/job-status", title: "Job status",
@@ -533,7 +636,7 @@ function snippets(ep, form) {
 		curl = `curl${h} -H "Content-Type: application/json" -d '${compact.replace(/'/g, "'\\''")}' "${url}"`;
 		let pretty = jsonBody || "{}";
 		try { pretty = JSON.stringify(JSON.parse(pretty), null, 2); } catch { /* keep as typed */ }
-		fetchCode = `const res = await fetch("${url}", {\n  method: "POST",\n  headers: { "Content-Type": "application/json"${needsToken ? `, Authorization: "Bearer ${tok}"` : ""} },\n  body: JSON.stringify(${pretty.replace(/\n/g, "\n  ")}),\n});\nconst data = await res.json();\nif (!res.ok) throw new Error(data.message);\nconsole.log(data.job_id, data.status);`;
+		fetchCode = `const res = await fetch("${url}", {\n  method: "POST",\n  headers: { "Content-Type": "application/json"${needsToken ? `, Authorization: "Bearer ${tok}"` : ""} },\n  body: JSON.stringify(${pretty.replace(/\n/g, "\n  ")}),\n});\nconst data = await res.json();\nif (!res.ok) throw new Error(data.message);\nconsole.log(${ep.path === "/preflight" ? "data.valid, data.errors" : "data.job_id, data.status"});`;
 	} else if (ep.file) {
 		curl = `curl${h} -F "file=@${fileName}" "${url}"`;
 		fetchCode = `const body = new FormData();\nbody.append("file", fileInput.files[0]); // <input type="file">\n\nconst res = await fetch("${url}", {\n  method: "POST",\n  ${hdr},\n  body,\n});\nconst data = await res.json();\nif (!res.ok) throw new Error(data.message);\nconsole.log(data.job_id, data.status);`;
@@ -558,7 +661,7 @@ function describeJob(s) {
 		case "printing": return "Printing";
 		case "paused": return "Held / paused";
 		case "error": return `Error: ${s.message || s.printer_message || "printer issue"}`;
-		case "completed": return "Printed successfully";
+		case "completed": return "Spooler reports completed";
 		case "gone": return "No longer in the queue";
 		case "failed": return `Failed: ${s.message || ""}`;
 		default: return "Unknown status";
@@ -620,7 +723,7 @@ function renderEndpoint(ep) {
 	const output = el("pre", { hidden: true });
 	const jobBox = el("div", { class: "job", hidden: true });
 	const send = el("button", { type: "submit" }, ep.method === "POST" ? "Send" : "Run");
-	const hint = ep.method === "POST" ? el("span", { class: "note" }, "This will print for real.") : null;
+	const hint = ep.method === "POST" ? el("span", { class: "note" }, ep.path === "/preflight" ? "Validation only; nothing is printed." : "This will print for real.") : null;
 	form.append(el("div", { class: "actions" }, send, hint), el("div", { class: "response" }, status, output, jobBox));
 
 	// code samples

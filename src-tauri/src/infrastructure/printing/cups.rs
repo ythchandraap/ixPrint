@@ -34,7 +34,7 @@ fn alert_message(alerts: &str) -> Option<(&'static str, bool)> {
         ("marker-supply-empty", "Ink/toner empty", true),
         ("door-open", "Printer door is open", true),
         ("cover-open", "Printer cover is open", true),
-        ("offline", "Printer offline / not responding", true),
+        ("offline", "Printer is offline or not responding", true),
         ("other-error", "Printer error", true),
         ("paused", "Printer paused", true),
         ("toner-low", "Ink/toner is low", false),
@@ -213,6 +213,10 @@ pub fn was_completed(printer: &str, spooler_job: &str) -> bool {
     run("lpstat", &["-W", "completed", "-o", printer])
         .map(|text| text.lines().any(|l| l.split_whitespace().next() == Some(spooler_job)))
         .unwrap_or(false)
+}
+
+pub fn cancel(_printer: &str, spooler_job: &str) -> Result<(), String> {
+    run("cancel", &[spooler_job]).map(|_| ())
 }
 
 pub fn os_default_printer() -> Option<String> {
@@ -417,7 +421,7 @@ mod tests {
         assert_eq!(s.len(), 3);
         assert_eq!(
             (s[0].status.as_str(), s[0].message.as_deref()),
-            ("Offline", Some("Printer offline / not responding"))
+            ("Offline", Some("Printer is offline or not responding"))
         );
         assert_eq!(
             (s[1].status.as_str(), s[1].printing.as_deref()),

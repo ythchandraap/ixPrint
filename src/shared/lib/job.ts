@@ -16,9 +16,9 @@ export function describeJob(s: Pick<JobStatus, "state" | "position" | "ahead" | 
     case "error":
       return `Error: ${s.message ?? "printer issue"}`;
     case "completed":
-      return "Printed successfully";
+      return "Spooler reports completed";
     case "gone":
-      return "No longer in the queue";
+      return "Left the queue; print outcome unknown";
     case "failed":
       return `Failed: ${s.message ?? ""}`;
     default:
