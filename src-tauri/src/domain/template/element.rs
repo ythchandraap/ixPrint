@@ -48,6 +48,38 @@ pub enum VAlign {
     Bottom,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TextFont {
+    #[default]
+    Helvetica,
+    Times,
+    Courier,
+    InstrumentSans,
+    IbmPlexMono,
+}
+
+impl TextFont {
+    fn supports_weight(self, weight: TextWeight) -> bool {
+        match self {
+            Self::Helvetica | Self::Times | Self::Courier => matches!(weight, TextWeight::Regular | TextWeight::Bold),
+            Self::InstrumentSans => true,
+            Self::IbmPlexMono => matches!(weight, TextWeight::Regular | TextWeight::Medium | TextWeight::SemiBold),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TextWeight {
+    #[default]
+    Regular,
+    Medium,
+    #[serde(rename = "semibold")]
+    SemiBold,
+    Bold,
+}
+
 /// Positions and sizes are in mm from the template's top-left corner.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -63,6 +95,11 @@ pub enum Element {
         text: String,
         #[serde(default = "default_font_size")]
         size: f32,
+        /// App or PDF standard family; missing values use Helvetica for older templates.
+        #[serde(default)]
+        font: TextFont,
+        #[serde(default)]
+        weight: Option<TextWeight>,
         #[serde(default)]
         bold: bool,
         #[serde(default)]
@@ -192,8 +229,21 @@ impl Element {
     pub(super) fn check(&self) -> Result<(), String> {
         let finite = |vals: &[f32]| vals.iter().all(|v| v.is_finite() && v.abs() <= MAX_SIZE_MM * 2.0);
         let ok = match self {
-            Element::Text { x, y, w, h, size, .. } => {
-                finite(&[*x, *y, *w, *h, *size]) && *w > 0.0 && *h > 0.0 && (2.0..=300.0).contains(size)
+            Element::Text {
+                x,
+                y,
+                w,
+                h,
+                size,
+                font,
+                weight,
+                ..
+            } => {
+                finite(&[*x, *y, *w, *h, *size])
+                    && *w > 0.0
+                    && *h > 0.0
+                    && (2.0..=300.0).contains(size)
+                    && weight.map_or(true, |weight| font.supports_weight(weight))
             }
             Element::Line {
                 x1, y1, x2, y2, width, ..

@@ -30,8 +30,61 @@ fn build<'a>(
 ) -> Result<PdfDocument<'a>, String> {
     let mut doc = pdfium.create_new_pdf().map_err(|e| e.to_string())?;
     let fonts = Fonts {
-        regular: doc.fonts_mut().helvetica(),
-        bold: doc.fonts_mut().helvetica_bold(),
+        helvetica_regular: doc.fonts_mut().helvetica(),
+        helvetica_bold: doc.fonts_mut().helvetica_bold(),
+        times_regular: doc.fonts_mut().times_roman(),
+        times_bold: doc.fonts_mut().times_bold(),
+        courier_regular: doc.fonts_mut().courier(),
+        courier_bold: doc.fonts_mut().courier_bold(),
+        instrument_sans_regular: doc
+            .fonts_mut()
+            .load_true_type_from_bytes(
+                include_bytes!("../../../assets/fonts/instrument-sans/InstrumentSans-400.ttf"),
+                false,
+            )
+            .map_err(|e| e.to_string())?,
+        instrument_sans_medium: doc
+            .fonts_mut()
+            .load_true_type_from_bytes(
+                include_bytes!("../../../assets/fonts/instrument-sans/InstrumentSans-500.ttf"),
+                false,
+            )
+            .map_err(|e| e.to_string())?,
+        instrument_sans_semibold: doc
+            .fonts_mut()
+            .load_true_type_from_bytes(
+                include_bytes!("../../../assets/fonts/instrument-sans/InstrumentSans-600.ttf"),
+                false,
+            )
+            .map_err(|e| e.to_string())?,
+        instrument_sans_bold: doc
+            .fonts_mut()
+            .load_true_type_from_bytes(
+                include_bytes!("../../../assets/fonts/instrument-sans/InstrumentSans-700.ttf"),
+                false,
+            )
+            .map_err(|e| e.to_string())?,
+        ibm_plex_mono_regular: doc
+            .fonts_mut()
+            .load_true_type_from_bytes(
+                include_bytes!("../../../assets/fonts/ibm-plex-mono/IBMPlexMono-400.ttf"),
+                false,
+            )
+            .map_err(|e| e.to_string())?,
+        ibm_plex_mono_medium: doc
+            .fonts_mut()
+            .load_true_type_from_bytes(
+                include_bytes!("../../../assets/fonts/ibm-plex-mono/IBMPlexMono-500.ttf"),
+                false,
+            )
+            .map_err(|e| e.to_string())?,
+        ibm_plex_mono_semibold: doc
+            .fonts_mut()
+            .load_true_type_from_bytes(
+                include_bytes!("../../../assets/fonts/ibm-plex-mono/IBMPlexMono-600.ttf"),
+                false,
+            )
+            .map_err(|e| e.to_string())?,
     };
     let w = template.width_mm;
     let n = records.len();
