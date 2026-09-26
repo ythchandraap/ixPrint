@@ -43,6 +43,9 @@ interface Box {
   h: number;
 }
 
+export type TextFont = "helvetica" | "times" | "courier" | "instrument_sans" | "ibm_plex_mono";
+export type TextWeight = "regular" | "medium" | "semibold" | "bold";
+
 /** Template elements; positions and sizes in mm from the top-left corner. */
 export type TemplateElement =
   | ({
@@ -52,6 +55,10 @@ export type TemplateElement =
       text: string;
       /** pt */
       size: number;
+      /** Supported font family; missing values use Helvetica for older templates. */
+      font?: TextFont;
+      /** Weight variant supported by the selected family; missing values use `bold`. */
+      weight?: TextWeight;
       bold: boolean;
       align: "left" | "center" | "right";
       valign: "top" | "middle" | "bottom";

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { Copy, Trash2 } from "lucide-vue-next";
-import type { TemplateElement } from "@/shared/api";
+import type { TemplateElement, TextFont, TextWeight } from "@/shared/api";
 import AutocompleteField from "@/shared/ui/AutocompleteField.vue";
 defineProps<{
   current: TemplateElement | null;
@@ -32,6 +32,49 @@ const valignOptions = [
 const fitOptions = [
   { value: "contain", label: "Fit (keep ratio)" }, { value: "stretch", label: "Fill box" },
 ];
+const fontOptions: { value: TextFont; label: string }[] = [
+  { value: "helvetica", label: "Helvetica (Sans serif)" },
+  { value: "times", label: "Times (Serif)" },
+  { value: "courier", label: "Courier (Monospace)" },
+  { value: "instrument_sans", label: "Instrument Sans" },
+  { value: "ibm_plex_mono", label: "IBM Plex Mono" },
+];
+const weightOptionsByFont: Record<TextFont, { value: TextWeight; label: string }[]> = {
+  helvetica: [{ value: "regular", label: "Regular · 400" }, { value: "bold", label: "Bold · 700" }],
+  times: [{ value: "regular", label: "Regular · 400" }, { value: "bold", label: "Bold · 700" }],
+  courier: [{ value: "regular", label: "Regular · 400" }, { value: "bold", label: "Bold · 700" }],
+  instrument_sans: [
+    { value: "regular", label: "Regular · 400" }, { value: "medium", label: "Medium · 500" },
+    { value: "semibold", label: "SemiBold · 600" }, { value: "bold", label: "Bold · 700" },
+  ],
+  ibm_plex_mono: [
+    { value: "regular", label: "Regular · 400" }, { value: "medium", label: "Medium · 500" },
+    { value: "semibold", label: "SemiBold · 600" },
+  ],
+};
+const weightRanks: Record<TextWeight, number> = { regular: 400, medium: 500, semibold: 600, bold: 700 };
+function weightOptionsFor(font: TextFont) { return weightOptionsByFont[font]; }
+function changeFont(element: TemplateElement, value: string) {
+  if (element.type !== "text") return;
+  const font = value as TextFont;
+  element.font = font;
+  const options = weightOptionsFor(font);
+  const previous = element.weight ?? (element.bold ? "bold" : "regular");
+  const weight = options.some((option) => option.value === previous)
+    ? previous
+    : options.reduce((closest, option) =>
+        Math.abs(weightRanks[option.value] - weightRanks[previous]) < Math.abs(weightRanks[closest.value] - weightRanks[previous])
+          ? option : closest,
+      options[0]).value;
+  element.weight = weight;
+  element.bold = weight === "bold" || weight === "semibold";
+}
+function changeWeight(element: TemplateElement, value: string) {
+  if (element.type !== "text") return;
+  const weight = value as TextWeight;
+  element.weight = weight;
+  element.bold = weight === "bold" || weight === "semibold";
+}
 function addField() {
   const field = newField.value.trim().replace(/[^A-Za-z0-9_.-]/g, "_");
   if (!field) return;
@@ -81,10 +124,11 @@ function useImageField(element: TemplateElement, field: string) {
         <h3>Appearance</h3>
         <template v-if="current.type === 'text'">
           <div class="property-grid-two">
+            <label class="field"><span>Font family</span><AutocompleteField :model-value="current.font ?? 'helvetica'" :options="fontOptions" aria-label="Font family" @update:model-value="changeFont(current, $event)" /></label>
             <label class="field"><span>Font size (pt)</span><input v-model.number="current.size" type="number" min="2" max="300" step="any" /></label>
             <label class="field"><span>Alignment</span><AutocompleteField v-model="current.align" :options="alignOptionsText" aria-label="Text alignment" /></label>
             <label class="field"><span>Vertical alignment</span><AutocompleteField v-model="current.valign" :options="valignOptions" aria-label="Vertical alignment" /></label>
-            <label class="row check"><input v-model="current.bold" type="checkbox" /> Bold</label>
+            <label class="field"><span>Font weight</span><AutocompleteField :model-value="current.weight ?? (current.bold ? 'bold' : 'regular')" :options="weightOptionsFor(current.font ?? 'helvetica')" aria-label="Font weight" @update:model-value="changeWeight(current, $event)" /></label>
             <label class="row check"><input v-model="current.wrap" type="checkbox" /> Wrap text</label>
             <label class="row check"><input v-model="current.fit" type="checkbox" /> Shrink to fit</label>
           </div>

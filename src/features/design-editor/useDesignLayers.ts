@@ -148,6 +148,8 @@ export function useDesignLayers(
             h: list.value ? Math.min(8, availableHeight) : Math.min(8, height - 2 * margin),
             text: "Text {{kolom}}",
             size: 10,
+            font: "instrument_sans",
+            weight: "regular",
             bold: false,
             align: "left",
             valign: "top",
