@@ -41,6 +41,7 @@ const emit = defineEmits<{
   (e: "config", config: Config): void;
   (e: "notify", message: string, error?: boolean): void;
   (e: "open-print", preset: string): void;
+  (e: "design-editor-active", active: boolean): void;
 }>();
 
 type View =
@@ -324,6 +325,7 @@ function imported(config: Config, list: string[]) {
     :server-port="serverPort"
     @saved="saved"
     @cancel="view = { kind: 'list' }"
+    @design-editor-active="emit('design-editor-active', $event)"
   >
     <template #design-editor="editorProps">
       <slot name="design-editor" v-bind="editorProps" />

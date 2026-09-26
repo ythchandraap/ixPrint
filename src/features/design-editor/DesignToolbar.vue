@@ -1,87 +1,107 @@
 <script setup lang="ts">
-import { Barcode, Image as ImageIcon, Minus, QrCode, Square, Type } from "lucide-vue-next";
-import type { Template } from "@/shared/api";
-import AutocompleteField from "@/shared/ui/AutocompleteField.vue";
-type ListLayout = Extract<NonNullable<Template["layout"]>, { mode: "list" }>;
+import { Barcode, ChevronDown, HelpCircle, Image as ImageIcon, Minus, PanelRight, QrCode, Redo2, Square, Type, Undo2 } from "lucide-vue-next";
+import { nextTick, ref } from "vue";
+
 type ElementType = Exclude<import("@/shared/api").TemplateElement["type"], "image">;
 defineProps<{
-  t: Template;
-  list: ListLayout | null;
-  quickSizes: [string, number, number][];
-  footerOptions: { value: string; label: string }[];
-  imageError: string;
+  pageLabel: string;
+  list: boolean;
+  canUndo: boolean;
+  canRedo: boolean;
+  showGrid: boolean;
+  showRulers: boolean;
+  showBands: boolean;
+  showObjectBounds: boolean;
+  snapEnabled: boolean;
+  zoom: string;
+  inspectorOpen: boolean;
 }>();
+const addMenu = ref<HTMLDetailsElement | null>(null);
 const emit = defineEmits<{
-  "set-mode": [mode: "label" | "list"];
-  add: [type: ElementType];
-  "choose-image": [];
+  add: [type: ElementType | "image"];
+  undo: [];
+  redo: [];
+  "open-page": [];
+  "update:showGrid": [value: boolean];
+  "update:showRulers": [value: boolean];
+  "update:showBands": [value: boolean];
+  "update:showObjectBounds": [value: boolean];
+  "update:snapEnabled": [value: boolean];
+  "update:zoom": [value: string];
+  "toggle-inspector": [];
+  help: [];
 }>();
+function checkbox(event: Event, key: "showGrid" | "showRulers" | "showBands" | "showObjectBounds") {
+  const value = (event.target as HTMLInputElement).checked;
+  if (key === "showGrid") emit("update:showGrid", value);
+  else if (key === "showRulers") emit("update:showRulers", value);
+  else if (key === "showBands") emit("update:showBands", value);
+  else emit("update:showObjectBounds", value);
+}
+const addItems: { type: ElementType | "image"; label: string; icon: typeof Type }[] = [
+  { type: "text", label: "Text", icon: Type }, { type: "line", label: "Line", icon: Minus },
+  { type: "rect", label: "Rectangle", icon: Square }, { type: "barcode", label: "Barcode", icon: Barcode },
+  { type: "qr", label: "QR", icon: QrCode }, { type: "image", label: "Image", icon: ImageIcon },
+];
+function addItem(type: ElementType | "image") {
+  if (addMenu.value) addMenu.value.open = false;
+  emit("add", type);
+  if (type !== "image") void nextTick(() => addMenu.value?.querySelector<HTMLElement>("summary")?.focus());
+}
+function menuKeys(event: KeyboardEvent) {
+  const menu = addMenu.value;
+  if (!menu) return;
+  const items = [...menu.querySelectorAll<HTMLButtonElement>("[role=menuitem]")];
+  if (event.key === "Escape") {
+    event.preventDefault();
+    menu.open = false;
+    menu.querySelector<HTMLElement>("summary")?.focus();
+    return;
+  }
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    if (!menu.open) menu.open = true;
+    const current = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next = event.key === "ArrowDown" ? (current + 1) % items.length : (current <= 0 ? items.length - 1 : current - 1);
+    items[next]?.focus();
+  }
+}
 </script>
-<template>
-  <div class="segmented">
-    <button type="button" :class="{ on: !list }" @click="emit('set-mode', 'label')">Label · 1 item = 1 page</button>
-    <button type="button" :class="{ on: !!list }" @click="emit('set-mode', 'list')">
-      List · multiple items per page
-    </button>
-  </div>
-  <div class="grid2">
-    <label class="field">
-      <span>Page width (mm)</span>
-      <input v-model.number="t.width_mm" type="number" min="5" max="2000" step="any" required />
-    </label>
-    <label v-if="!list?.roll" class="field">
-      <span>Page height (mm)</span>
-      <input v-model.number="t.height_mm" type="number" min="5" max="2000" step="any" required />
-    </label>
-  </div>
-  <fieldset v-if="list">
-    <legend>Bands</legend>
-    <p class="hint">
-      The header is printed at the top of each page, the row repeats for each item, and the footer
-      {{ list.footer === "every_page" ? "appears at the bottom of each page" : "appears once after the last row" }}.
-      Elements are assigned to a band according to their canvas position.
-    </p>
-    <div class="grid4">
-      <label class="field"
-        ><span>Header (mm)</span><input v-model.number="list.header_mm" type="number" min="0" step="any"
-      /></label>
-      <label class="field"
-        ><span>Row (mm)</span><input v-model.number="list.row_mm" type="number" min="1" step="any"
-      /></label>
-      <label class="field"
-        ><span>Footer (mm)</span><input v-model.number="list.footer_mm" type="number" min="0" step="any"
-      /></label>
-    </div>
-    <div class="grid2">
-      <label class="field"
-        ><span>Footer</span>
-        <AutocompleteField v-model="list.footer" :options="footerOptions" aria-label="Footer position" />
-      </label>
-      <label class="row tight check"
-        ><input v-model="list.roll" type="checkbox" /> Roll/receipt: height follows content</label
-      >
-    </div>
-  </fieldset>
-  <div v-if="!list?.roll" class="row wrap">
-    <button
-      v-for="[label, w, h] in quickSizes"
-      :key="label"
-      type="button"
-      class="ghost small"
-      @click="[t.width_mm, t.height_mm] = [w, h]"
-    >
-      {{ label }}
-    </button>
-  </div>
 
-  <div class="row wrap toolbar">
-    <span class="meta">Add:</span>
-    <button type="button" class="ghost small" @click="emit('add', 'text')"><Type :size="14" /> Text</button>
-    <button type="button" class="ghost small" @click="emit('add', 'line')"><Minus :size="14" /> Line</button>
-    <button type="button" class="ghost small" @click="emit('add', 'rect')"><Square :size="14" /> Rectangle</button>
-    <button type="button" class="ghost small" @click="emit('add', 'barcode')"><Barcode :size="14" /> Barcode</button>
-    <button type="button" class="ghost small" @click="emit('add', 'qr')"><QrCode :size="14" /> QR</button>
-    <button type="button" class="ghost small" @click="emit('choose-image')"><ImageIcon :size="14" /> Image</button>
+<template>
+  <div class="design-toolbar" aria-label="Canvas tools">
+    <div class="toolbar-primary">
+      <details ref="addMenu" class="toolbar-menu add-menu" @keydown="menuKeys">
+        <summary class="ghost"><span><strong>+</strong> Add</span><ChevronDown :size="14" aria-hidden="true" /></summary>
+        <div class="toolbar-popover" role="menu" aria-label="Add object">
+          <button v-for="item in addItems" :key="item.type" type="button" role="menuitem" @click="addItem(item.type)">
+            <component :is="item.icon" :size="16" aria-hidden="true" /> {{ item.label }}
+          </button>
+        </div>
+      </details>
+      <button type="button" class="icon" title="Undo" aria-label="Undo" :disabled="!canUndo" @click="emit('undo')"><Undo2 :size="17" /></button>
+      <button type="button" class="icon" title="Redo" aria-label="Redo" :disabled="!canRedo" @click="emit('redo')"><Redo2 :size="17" /></button>
+      <button type="button" class="ghost small page-summary" @click="emit('open-page')">{{ pageLabel }}</button>
+      <button type="button" class="icon inspector-toggle" :aria-pressed="inspectorOpen" aria-label="Inspector" title="Inspector" @click="emit('toggle-inspector')"><PanelRight :size="16" /></button>
+    </div>
+    <div class="toolbar-secondary">
+      <details class="toolbar-menu guides-menu">
+        <summary class="ghost small"><span>Guides</span><ChevronDown :size="14" aria-hidden="true" /></summary>
+        <div class="toolbar-popover guide-options" aria-label="Canvas guides">
+          <label><input type="checkbox" :checked="showGrid" @change="checkbox($event, 'showGrid')" /> Grid</label>
+          <label><input type="checkbox" :checked="showRulers" @change="checkbox($event, 'showRulers')" /> Rulers</label>
+          <label v-if="list"><input type="checkbox" :checked="showBands" @change="checkbox($event, 'showBands')" /> Bands</label>
+          <label><input type="checkbox" :checked="showObjectBounds" @change="checkbox($event, 'showObjectBounds')" /> Object bounds</label>
+        </div>
+      </details>
+      <label class="snap-control"><input type="checkbox" :checked="snapEnabled" @change="emit('update:snapEnabled', ($event.target as HTMLInputElement).checked)" /> Snap</label>
+      <label class="zoom-control"><span class="sr-only">Zoom</span>
+        <select :value="zoom" aria-label="Canvas zoom" @change="emit('update:zoom', ($event.target as HTMLSelectElement).value)">
+          <option value="fit">Fit</option>
+          <option v-for="level in [50, 75, 100, 125, 150, 200]" :key="level" :value="String(level)">{{ level }}%</option>
+        </select>
+      </label>
+      <button type="button" class="icon help-button" title="Keyboard and group help" aria-label="Help" @click="emit('help')"><HelpCircle :size="16" /></button>
+    </div>
   </div>
-  <p v-if="imageError" class="error">⚠ {{ imageError }}</p>
 </template>

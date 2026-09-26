@@ -9,9 +9,9 @@ const props = defineProps<{
   autoFields: string[];
   autoHint: Record<string, string>;
   exampleBody: string;
-  localIp: string;
-  serverPort: number;
 }>();
+const source = ref<"sample" | "json">("sample");
+const viewMode = ref<"input" | "result">("input");
 const previewRows = ref(12);
 const printPages = ref<string[]>([]);
 const printTotal = ref(0);
@@ -19,6 +19,9 @@ const printError = ref("");
 const printBusy = ref(false);
 const sampleJson = ref(props.exampleBody);
 const sampleEdited = ref(false);
+const previewPage = ref(0);
+const previewSnapshot = ref("");
+let previewRequest = 0;
 watch(() => props.exampleBody, (body) => {
   if (!sampleEdited.value) sampleJson.value = body;
 });
@@ -37,7 +40,7 @@ const parsed = computed(() => {
     const body = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
     const raw = body && "data" in body ? body.data : value;
     const items = Array.isArray(raw) ? raw : [raw];
-    if (!items.length || items.length > 500) throw new Error("Use 1–500 data items");
+    if (!items.length || items.length > 500) throw new Error("Use 1–500 records");
     const records = items.map((item, index) => asRecord(item, `data[${index + 1}]`));
     const header = body && "header" in body ? asRecord(body.header, "header") : {};
     const missing = records.flatMap((record, index) =>
@@ -52,133 +55,137 @@ const parsed = computed(() => {
     return { records: [] as Record<string, string>[], header: {} as Record<string, string>, missing: [] as string[], unused: [] as string[], error: errorText(error) };
   }
 });
+const previewSignature = computed(() => JSON.stringify({
+  template: props.template,
+  source: source.value,
+  json: source.value === "json" ? sampleJson.value : "",
+  rows: source.value === "sample" ? previewRows.value : null,
+}));
+const previewOutOfDate = computed(() => !!previewSnapshot.value && previewSnapshot.value !== previewSignature.value);
 function toggleRequired(field: string, required: boolean) {
   const next = new Set(props.template.required_fields ?? []);
   if (required) next.add(field);
   else next.delete(field);
   props.template.required_fields = [...next].sort();
 }
-function useJsonSample() {
+function useFirstRecord() {
   if (parsed.value.error || !parsed.value.records.length) return;
   Object.assign(props.template.sample, parsed.value.header, parsed.value.records[0]);
 }
-async function showPrintPreview() {
+async function previewCurrent() {
+  if (source.value === "json" && (parsed.value.error || parsed.value.missing.length)) return;
+  if (source.value === "sample" && (!Number.isInteger(previewRows.value) || previewRows.value < 1 || previewRows.value > 500)) {
+    printError.value = "Use 1–500 sample items";
+    return;
+  }
+  const request = ++previewRequest;
+  const signature = previewSignature.value;
   printBusy.value = true;
   printError.value = "";
   try {
-    const rows = props.list ? previewRows.value : Math.min(previewRows.value, 6);
-    const [pages, total] = await api.previewPrint(JSON.parse(JSON.stringify(props.template)), rows, 3);
-    [printPages.value, printTotal.value] = [pages, total];
+    const result = source.value === "json"
+      ? await api.previewPrintData(JSON.parse(JSON.stringify(props.template)), parsed.value.records, parsed.value.header, 3)
+      : await api.previewPrint(JSON.parse(JSON.stringify(props.template)), props.list ? previewRows.value : Math.min(previewRows.value, 6), 3);
+    if (request !== previewRequest) return;
+    [printPages.value, printTotal.value] = result;
+    previewPage.value = 0;
+    previewSnapshot.value = signature;
+    viewMode.value = "result";
   } catch (error) {
-    printError.value = errorText(error);
+    if (request === previewRequest) {
+      printError.value = errorText(error);
+      viewMode.value = "input";
+    }
   } finally {
-    printBusy.value = false;
+    if (request === previewRequest) printBusy.value = false;
   }
 }
-async function showJsonPreview() {
-  if (parsed.value.error || parsed.value.missing.length) return;
-  printBusy.value = true;
-  printError.value = "";
-  try {
-    const [pages, total] = await api.previewPrintData(
-      JSON.parse(JSON.stringify(props.template)), parsed.value.records, parsed.value.header, 3,
-    );
-    [printPages.value, printTotal.value] = [pages, total];
-  } catch (error) {
-    printError.value = errorText(error);
-  } finally {
-    printBusy.value = false;
-  }
+function movePreviewPage(delta: -1 | 1) {
+  previewPage.value = Math.max(0, Math.min(printPages.value.length - 1, previewPage.value + delta));
 }
+defineExpose({ previewCurrent });
 </script>
+
 <template>
-  <fieldset>
-    <legend>Sample data</legend>
-    <p class="hint">
-      Enter example values to see dynamic text in the design preview and test print. New fields start with “Contoh”.
-    </p>
-    <p v-if="!fields.length" class="hint">
-      No fields yet. Write {{ "{" + "{field}" + "}" }} in text, barcode or QR content.
-    </p>
-    <template v-if="autoFields.length">
-      <p class="hint">
-        Automatic fields — leave blank for ix.print to fill, or enter your own value (the web app may also send it):
-      </p>
-      <div class="grid2">
-        <label v-for="field in autoFields" :key="field" class="field">
-          <span>{{ field }}</span>
-          <input v-model="template.sample[field]" :placeholder="`automatic: ${autoHint[field]}`" />
-        </label>
+  <section class="data-preview" :data-view-mode="viewMode" aria-label="Data and print preview">
+    <div class="data-preview-mobile-tabs" role="tablist" aria-label="Preview pane">
+      <button type="button" role="tab" :aria-selected="viewMode === 'input'" @click="viewMode = 'input'">Input</button>
+      <button type="button" role="tab" :aria-selected="viewMode === 'result'" @click="viewMode = 'result'">Result</button>
+    </div>
+    <section class="data-input-pane" aria-label="Preview input">
+      <div class="preview-source-tabs" role="tablist" aria-label="Data source">
+        <button type="button" role="tab" :aria-selected="source === 'sample'" @click="source = 'sample'">Sample values</button>
+        <button type="button" role="tab" :aria-selected="source === 'json'" @click="source = 'json'">JSON payload</button>
       </div>
-    </template>
-    <p v-else class="hint">
-      Available automatic fields: <code>{{ "{" + "{no}" + "}" }}</code
-      >, <code>{{ "{" + "{halaman}" + "}" }}</code
-      >, <code>{{ "{" + "{total_halaman}" + "}" }}</code
-      >, <code>{{ "{" + "{jumlah_data}" + "}" }}</code> — their values can also be provided manually.
-    </p>
-    <div class="grid2">
-      <label v-for="field in fields" :key="field" class="field">
-        <span>{{ field }}</span>
-        <input v-model="template.sample[field]" placeholder="e.g. Product name" />
-        <span class="row tight check"><input type="checkbox" :checked="template.required_fields?.includes(field)" @change="toggleRequired(field, ($event.target as HTMLInputElement).checked)" /> Required for printing</span>
-      </label>
-    </div>
-  </fieldset>
 
-  <fieldset class="stack tight">
-    <legend>Real data preview</legend>
-    <p class="hint">Paste the JSON body your application will send. Preview renders these records without printing.</p>
-    <textarea v-model="sampleJson" rows="7" spellcheck="false" class="json-sample" @input="sampleEdited = true"></textarea>
-    <p v-if="parsed.error" class="error">{{ parsed.error }}</p>
-    <p v-else-if="parsed.missing.length" class="error">Required values missing: {{ parsed.missing.slice(0, 5).join(", ") }}{{ parsed.missing.length > 5 ? ` (+${parsed.missing.length - 5} more)` : "" }}</p>
-    <p v-if="parsed.unused.length" class="hint">Data fields not used by this design: {{ parsed.unused.join(", ") }}</p>
-    <div class="row wrap">
-      <button type="button" class="ghost small" :disabled="!!parsed.error" @click="useJsonSample">Use first item as canvas sample</button>
-      <button type="button" class="ghost small" :disabled="printBusy || !!parsed.error || !!parsed.missing.length" @click="showJsonPreview">
-        {{ printBusy ? "Rendering…" : "Preview JSON" }}
-      </button>
-    </div>
-  </fieldset>
-
-  <fieldset>
-    <legend>Call from a web app</legend>
-    <p class="hint">Send a JSON body (plus the token header when required):</p>
-    <pre class="settings">
-POST http://{{ localIp }}:{{ serverPort }}/print
-Content-Type: application/json
-{{ exampleBody }}</pre>
-    <p class="hint">
-      <code>"data"</code> is an array: one object = {{ list ? "one row" : "one label" }}.
-      <code>"header"</code> (optional) contains values shared by every page{{
-        list ? " — fields in the Header/Footer bands" : ""
-      }}. Other settings go in <code>"settings"</code>, e.g. <code>{"copies": 2}</code>.
-    </p>
-  </fieldset>
-
-  <fieldset>
-    <legend>Print preview</legend>
-    <div class="row">
-      <label class="row tight grow">
-        <input v-model.number="previewRows" class="rows-input" type="number" min="1" max="500" />
-        <span class="meta">sample items</span>
-      </label>
-      <button type="button" class="ghost small" :disabled="printBusy" @click="showPrintPreview">
-        {{ printBusy ? "Rendering…" : "Show" }}
-      </button>
-    </div>
-    <p v-if="printError" class="error">{{ printError }}</p>
-    <template v-if="printPages.length">
-      <p class="meta">
-        {{ printTotal }} page{{ printTotal === 1 ? "" : "s"
-        }}{{ printTotal > printPages.length ? ` (${printPages.length} first shown)` : "" }}
-      </p>
-      <div class="pages">
-        <figure v-for="(src, index) in printPages" :key="index">
-          <img :src="src" alt="" />
-          <figcaption class="meta">p. {{ index + 1 }}</figcaption>
-        </figure>
+      <div v-show="source === 'sample'" class="sample-input stack">
+        <div class="sample-input-heading">
+          <h2>Sample values</h2>
+          <p class="hint">Values used in the canvas and sample preview.</p>
+        </div>
+        <p v-if="!fields.length" class="hint">No fields yet. Add <code>{{ "{" + "{field}" + "}" }}</code> to text, barcode, or QR content.</p>
+        <details v-if="autoFields.length" class="automatic-fields">
+          <summary>Automatic fields ({{ autoFields.length }})</summary>
+          <div class="automatic-field-list">
+            <label v-for="field in autoFields" :key="field" class="field">
+              <span>{{ field }}</span><input v-model="template.sample[field]" :placeholder="`automatic: ${autoHint[field]}`" />
+            </label>
+          </div>
+        </details>
+        <div class="sample-table" role="table" aria-label="Sample values and required fields">
+          <div class="sample-table-head" role="row">
+            <span role="columnheader">Field</span><span role="columnheader">Sample value</span><span role="columnheader">Required</span>
+          </div>
+          <div v-for="field in fields" :key="field" class="sample-field-row" role="row">
+            <span class="sample-field-name" role="rowheader">{{ field }}</span>
+            <input v-model="template.sample[field]" role="cell" :aria-label="`Sample value for ${field}`" placeholder="e.g. Product name" />
+            <label class="sample-required" role="cell"><input type="checkbox" :checked="template.required_fields?.includes(field)" :aria-label="`Required for printing: ${field}`" @change="toggleRequired(field, ($event.target as HTMLInputElement).checked)" /> Required</label>
+          </div>
+        </div>
+        <div class="sample-preview-controls">
+          <label class="field"><span>Sample items</span><input v-model.number="previewRows" type="number" min="1" max="500" /></label>
+          <button type="button" class="primary small" :disabled="printBusy" @click="previewCurrent">{{ printBusy ? "Rendering…" : "Preview" }}</button>
+        </div>
       </div>
-    </template>
-  </fieldset>
+
+      <div v-show="source === 'json'" class="json-input stack">
+        <div class="sample-input-heading">
+          <h2>JSON payload</h2>
+          <p class="hint">Paste request data to preview it without printing.</p>
+        </div>
+        <textarea v-model="sampleJson" spellcheck="false" class="json-sample" aria-label="JSON payload" @input="sampleEdited = true"></textarea>
+        <p v-if="parsed.error" class="error" role="alert">{{ parsed.error }}</p>
+        <p v-else-if="parsed.missing.length" class="error" role="alert">Required values missing: {{ parsed.missing.slice(0, 5).join(", ") }}{{ parsed.missing.length > 5 ? ` (+${parsed.missing.length - 5} more)` : "" }}</p>
+        <p v-if="parsed.unused.length" class="hint">Unused fields: {{ parsed.unused.join(", ") }}</p>
+        <div class="row wrap">
+          <button type="button" class="ghost small" :disabled="!!parsed.error" @click="useFirstRecord">Use first record</button>
+          <button type="button" class="primary small" :disabled="printBusy || !!parsed.error || !!parsed.missing.length" @click="previewCurrent">{{ printBusy ? "Rendering…" : "Preview" }}</button>
+        </div>
+      </div>
+      <p v-if="printBusy" class="muted input-preview-status" role="status">Rendering…</p>
+      <div v-if="printError" class="inline-preview-error"><p class="error" role="alert">{{ printError }}</p><button type="button" class="ghost small" @click="previewCurrent">Retry</button></div>
+    </section>
+
+    <section class="preview-result-pane" aria-label="Rendered result" aria-live="polite">
+      <div class="preview-result-heading">
+        <div><h2>Result</h2><p v-if="previewOutOfDate" class="preview-stale">Preview out of date</p></div>
+        <button v-if="previewOutOfDate" type="button" class="ghost small" :disabled="printBusy" @click="previewCurrent">Refresh</button>
+      </div>
+      <p v-if="printBusy" role="status" class="muted">Rendering…</p>
+      <template v-else-if="printError">
+        <p class="error" role="alert">{{ printError }}</p>
+        <button type="button" class="ghost small" @click="previewCurrent">Retry</button>
+      </template>
+      <template v-else-if="printPages.length">
+        <div class="preview-page-controls">
+          <button type="button" class="icon" aria-label="Previous preview page" :disabled="previewPage === 0" @click="movePreviewPage(-1)">‹</button>
+          <span class="mono">Page {{ previewPage + 1 }} of {{ printTotal }}</span>
+          <button type="button" class="icon" aria-label="Next preview page" :disabled="previewPage >= printPages.length - 1" @click="movePreviewPage(1)">›</button>
+        </div>
+        <p v-if="printTotal > printPages.length" class="meta">Showing first {{ printPages.length }} pages.</p>
+        <div class="preview-page-image"><img :src="printPages[previewPage]" :alt="`Preview page ${previewPage + 1}`" /></div>
+      </template>
+      <p v-else class="muted">Generate a preview to see the print output.</p>
+    </section>
+  </section>
 </template>
