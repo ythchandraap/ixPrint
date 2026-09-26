@@ -1,0 +1,6 @@
+{
+  "preset": "label-produk",
+  "data": [
+    { "nama": "Product A", "kode": "SKU-001" }
+  ]
+}

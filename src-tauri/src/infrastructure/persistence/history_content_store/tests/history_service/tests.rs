@@ -72,6 +72,7 @@ fn remote_job_shows_local_input_and_does_not_claim_a_local_preview() {
         settings: serde_json::json!({}),
         success: true,
         error: None,
+        error_code: None,
         duration_ms: 1,
         callback: None,
         remote: Some(RemoteJob {
@@ -162,6 +163,7 @@ fn pdf_page_reader_returns_only_the_requested_page_for_input_and_output() {
         settings: serde_json::json!({}),
         success: true,
         error: None,
+        error_code: None,
         duration_ms: 1,
         callback: None,
         remote: None,
@@ -244,6 +246,29 @@ fn changing_retention_prunes_content_and_metadata_together() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[test]
+fn retention_cleanup_errors_are_diagnostic_and_do_not_fail_the_setting_change() {
+    let root = std::env::temp_dir().join(format!("ixprint-retention-error-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&root).unwrap();
+    let history_path = root.join("history-is-a-file");
+    std::fs::write(&history_path, b"not a directory").unwrap();
+    let history = Arc::new(History::with_content_dir(history_path, root.join("history-content")));
+    let mut app = Arc::try_unwrap(test_support::state()).ok().unwrap();
+    app.history = history;
+    let state = Arc::new(app);
+
+    let config = service::set_retention(&state, 7).unwrap();
+
+    assert_eq!(config.history_retention_days, 7);
+    assert!(state
+        .diagnostics
+        .read()
+        .unwrap()
+        .iter()
+        .any(|entry| entry.source == "history-retention"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
 fn test_entry(time: &str) -> HistoryEntry {
     HistoryEntry {
         id: uuid::Uuid::new_v4().to_string(),
@@ -259,6 +284,7 @@ fn test_entry(time: &str) -> HistoryEntry {
         settings: serde_json::json!({}),
         success: true,
         error: None,
+        error_code: None,
         duration_ms: 1,
         callback: None,
         remote: None,

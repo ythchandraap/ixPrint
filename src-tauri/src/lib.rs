@@ -4,6 +4,7 @@ pub mod infrastructure;
 pub mod interfaces;
 pub mod shared;
 
+use application::ports::IdempotencyRepository;
 use application::state::AppState;
 use infrastructure::net::{callback_client::CallbackClient, remote_client::RemoteClient};
 use infrastructure::os::SystemClock;
@@ -71,16 +72,17 @@ pub fn run() {
                 let config = ConfigStore::load(&data_dir);
                 let remotes = RemoteStore::load(&data_dir);
                 let history = History::with_content_dir(data_dir.join("history"), data_dir.join("history-content"));
-                history.prune(config.get().history_retention_days);
                 let idempotency = IdempotencyStore::new(data_dir.join("idempotency"));
                 idempotency.prune();
-                let incoming_documents = IncomingStore::new(data_dir.join("incoming-documents"));
-                if let Err(error) = crate::application::document_service::prune(
-                    &incoming_documents,
-                    config.get().history_retention_days,
-                ) {
-                    let _ = diagnostics.record("error", "incoming-documents", &error, None);
+                if let Err(error) = idempotency.recover(&history) {
+                    let _ = diagnostics.record(
+                        "error",
+                        "idempotency",
+                        "Could not recover print operation states",
+                        Some(&error),
+                    );
                 }
+                let incoming_documents = IncomingStore::new(data_dir.join("incoming-documents"));
 
                 let state = Arc::new(AppState {
                     config: Arc::new(config),
@@ -104,10 +106,17 @@ pub fn run() {
                     clock: Arc::new(SystemClock),
                     jobs_dir,
                 });
+                application::history_service::prune_current_retention(&state);
                 app.manage(state.clone());
 
                 let callback_state = state.clone();
                 std::thread::spawn(move || application::callback_service::resume_pending(callback_state));
+
+                let retention_state = state.clone();
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(60 * 60));
+                    application::history_service::prune_current_retention(&retention_state);
+                });
 
                 if state.config.get().bridge_enabled {
                     interfaces::http::spawn(state.clone());

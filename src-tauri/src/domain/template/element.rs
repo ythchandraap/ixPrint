@@ -243,7 +243,7 @@ impl Element {
                     && *w > 0.0
                     && *h > 0.0
                     && (2.0..=300.0).contains(size)
-                    && weight.map_or(true, |weight| font.supports_weight(weight))
+                    && weight.is_none_or(|weight| font.supports_weight(weight))
             }
             Element::Line {
                 x1, y1, x2, y2, width, ..

@@ -1,5 +1,4 @@
-use crate::application::ports::RemoteGateway;
-use crate::domain::incoming_job::IncomingSource;
+use crate::application::ports::{ReadyPrintRequest, RemoteGateway};
 use crate::domain::printer;
 use crate::domain::remote::{
     settings_query, ReadyPrintResult, Remote, RemoteError, RemotePrintResult, SharedPreset, SharedPresetListing,
@@ -39,7 +38,20 @@ fn agent(timeout: Duration) -> ureq::Agent {
 }
 
 fn request_error(remote: &Remote, error: impl std::fmt::Display) -> RemoteError {
-    RemoteError::Failed(format!("{} cannot be reached ({}): {}", remote.name, remote.url, error))
+    RemoteError::Failed(format!(
+        "{} cannot be reached ({}): {}",
+        remote.name,
+        remote.url,
+        redact_remote_token(remote, error.to_string())
+    ))
+}
+
+fn redact_remote_token(remote: &Remote, message: String) -> String {
+    if remote.token.is_empty() {
+        message
+    } else {
+        message.replace(&remote.token, "[redacted]")
+    }
 }
 
 fn response_message(body: &str, status: u16) -> String {
@@ -63,7 +75,7 @@ fn read_response<T: DeserializeOwned>(
         serde_json::from_str(&body)
             .map_err(|e| RemoteError::Failed(format!("{} returned invalid JSON: {}", remote.name, e)))
     } else {
-        let message = response_message(&body, status);
+        let message = redact_remote_token(remote, response_message(&body, status));
         match status {
             400 | 404 => Err(RemoteError::BadRequest(format!("{}: {}", remote.name, message))),
             401 => Err(RemoteError::Failed(format!(
@@ -76,6 +88,45 @@ fn read_response<T: DeserializeOwned>(
             ))),
             _ => Err(RemoteError::Failed(format!("{}: {}", remote.name, message))),
         }
+    }
+}
+
+fn read_print_response<T: DeserializeOwned>(
+    remote: &Remote,
+    mut response: ureq::http::Response<ureq::Body>,
+) -> Result<T, RemoteError> {
+    let status = response.status().as_u16();
+    let body = response
+        .body_mut()
+        .read_to_string()
+        .map_err(|error| RemoteError::OutcomeUnknown(request_error(remote, error).to_string()))?;
+    if (200..300).contains(&status) {
+        return serde_json::from_str(&body).map_err(|error| {
+            RemoteError::OutcomeUnknown(format!(
+                "{} accepted the print request but returned an unreadable result: {}",
+                remote.name, error
+            ))
+        });
+    }
+
+    let message = redact_remote_token(remote, response_message(&body, status));
+    let code = serde_json::from_str::<Value>(&body)
+        .ok()
+        .and_then(|value| value.get("code").and_then(Value::as_str).map(str::to_owned));
+    match status {
+        400 | 404 => Err(RemoteError::BadRequest(format!("{}: {}", remote.name, message))),
+        401 => Err(RemoteError::Failed(format!(
+            "{}: token rejected — create a new token on that computer",
+            remote.name
+        ))),
+        409 if code.as_deref() == Some("outcome_unknown") => Err(RemoteError::OutcomeUnknown(message)),
+        409 => Err(RemoteError::BadRequest(format!("{}: {}", remote.name, message))),
+        429 => Err(RemoteError::Failed(format!(
+            "{}: print request was rate limited; check History before retrying",
+            remote.name
+        ))),
+        202 | 500..=599 => Err(RemoteError::OutcomeUnknown(format!("{}: {}", remote.name, message))),
+        _ => Err(RemoteError::Failed(format!("{}: {}", remote.name, message))),
     }
 }
 
@@ -251,6 +302,7 @@ fn print_pdf(
     path: &Path,
     file_name: &str,
     settings: &PrintSettings,
+    logical_job_id: &str,
 ) -> Result<RemotePrintResult, RemoteError> {
     let size = fs::metadata(path).map_err(|e| request_error(remote, e))?.len();
     if size > MAX_UPLOAD_BYTES as u64 {
@@ -267,26 +319,30 @@ fn print_pdf(
         agent(Duration::from_secs(120)).post(format!("{}/print", remote.url)),
         remote,
     )
-    .header("Content-Type", format!("multipart/form-data; boundary={}", boundary));
+    .header("Content-Type", format!("multipart/form-data; boundary={}", boundary))
+    .header("Idempotency-Key", logical_idempotency_key(logical_job_id));
     if let Some(preset) = &remote.preset {
         request = request.query("preset", preset);
     }
     for (key, value) in settings_query(settings) {
         request = request.query(key, value);
     }
-    let response = request.send(body).map_err(|e| request_error(remote, e))?;
-    read_response(remote, response)
+    let response = request
+        .send(body)
+        .map_err(|error| RemoteError::OutcomeUnknown(request_error(remote, error).to_string()))?;
+    read_print_response(remote, response)
 }
 
-fn print_ready_pdf(
-    remote: &Remote,
-    path: &Path,
-    file_name: &str,
-    source: IncomingSource,
-    source_job_id: &str,
-    copies: u32,
-    printer: &str,
-) -> Result<ReadyPrintResult, RemoteError> {
+fn print_ready_pdf(request: ReadyPrintRequest<'_>) -> Result<ReadyPrintResult, RemoteError> {
+    let ReadyPrintRequest {
+        remote,
+        path,
+        file_name,
+        source,
+        source_job_id,
+        copies,
+        printer,
+    } = request;
     let size = fs::metadata(path).map_err(|e| request_error(remote, e))?.len();
     if size > MAX_UPLOAD_BYTES as u64 {
         return Err(RemoteError::BadRequest("PDF file is too large".into()));
@@ -316,20 +372,32 @@ fn print_ready_pdf(
     read_response(remote, response)
 }
 
-fn test_page(remote: &Remote, pages: u32, settings: &PrintSettings) -> Result<RemotePrintResult, RemoteError> {
+fn test_page(
+    remote: &Remote,
+    pages: u32,
+    settings: &PrintSettings,
+    logical_job_id: &str,
+) -> Result<RemotePrintResult, RemoteError> {
     let mut request = with_auth(
         agent(Duration::from_secs(60)).post(format!("{}/test-page", remote.url)),
         remote,
     )
-    .query("count", pages.to_string());
+    .query("count", pages.to_string())
+    .header("Idempotency-Key", logical_idempotency_key(logical_job_id));
     if let Some(preset) = &remote.preset {
         request = request.query("preset", preset);
     }
     for (key, value) in settings_query(settings) {
         request = request.query(key, value);
     }
-    let response = request.send_empty().map_err(|e| request_error(remote, e))?;
-    read_response(remote, response)
+    let response = request
+        .send_empty()
+        .map_err(|error| RemoteError::OutcomeUnknown(request_error(remote, error).to_string()))?;
+    read_print_response(remote, response)
+}
+
+fn logical_idempotency_key(logical_job_id: &str) -> String {
+    format!("ixprint-{}", logical_job_id)
 }
 
 #[derive(Default)]
@@ -360,28 +428,21 @@ impl RemoteGateway for RemoteClient {
         path: &Path,
         file_name: &str,
         settings: &PrintSettings,
+        logical_job_id: &str,
     ) -> Result<RemotePrintResult, RemoteError> {
-        self::print_pdf(remote, path, file_name, settings)
+        self::print_pdf(remote, path, file_name, settings, logical_job_id)
     }
-    fn print_ready_pdf(
-        &self,
-        remote: &Remote,
-        path: &Path,
-        file_name: &str,
-        source: IncomingSource,
-        source_job_id: &str,
-        copies: u32,
-        printer: &str,
-    ) -> Result<ReadyPrintResult, RemoteError> {
-        self::print_ready_pdf(remote, path, file_name, source, source_job_id, copies, printer)
+    fn print_ready_pdf(&self, request: ReadyPrintRequest<'_>) -> Result<ReadyPrintResult, RemoteError> {
+        self::print_ready_pdf(request)
     }
     fn test_page(
         &self,
         remote: &Remote,
         pages: u32,
         settings: &PrintSettings,
+        logical_job_id: &str,
     ) -> Result<RemotePrintResult, RemoteError> {
-        self::test_page(remote, pages, settings)
+        self::test_page(remote, pages, settings, logical_job_id)
     }
 }
 

@@ -14,6 +14,7 @@ pub(super) enum Submission {
     New(crate::domain::job::JobResult, Option<serde_json::Value>),
     Replay(crate::domain::job::JobResult, Option<serde_json::Value>),
     Pending(Option<String>),
+    Unknown(Option<String>),
     Conflict,
 }
 

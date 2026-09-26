@@ -102,3 +102,30 @@ fn content_length(headers: &actix_web::http::header::HeaderMap) -> Option<u64> {
 fn truncate(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::test::TestRequest;
+
+    #[test]
+    fn api_access_entry_does_not_store_authorization_or_query_token_values() {
+        let bearer_secret = "fxp-secret-header-value";
+        let alternate_secret = "fxp-secret-alternate-header-value";
+        let query_secret = "fxp-secret-query-value";
+        let request = TestRequest::default()
+            .uri(&format!("/print?token={query_secret}"))
+            .insert_header(("Authorization", format!("Bearer {bearer_secret}")))
+            .insert_header(("X-Api-Token", alternate_secret))
+            .to_srv_request();
+        let state = crate::application::state::test_support::state();
+
+        let (entry, _) = request_entry(&request, &state);
+        let serialized = serde_json::to_string(&entry).unwrap();
+
+        assert_eq!(entry.path, "/print");
+        assert!(!serialized.contains(bearer_secret));
+        assert!(!serialized.contains(alternate_secret));
+        assert!(!serialized.contains(query_secret));
+    }
+}

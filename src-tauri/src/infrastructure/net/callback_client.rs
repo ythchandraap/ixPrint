@@ -275,6 +275,7 @@ mod tests {
                 settings: serde_json::Value::Null,
                 success: false,
                 error: Some("Kertas macet".into()),
+                error_code: None,
                 duration_ms: 1,
                 callback: None,
                 remote: None,

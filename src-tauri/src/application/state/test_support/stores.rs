@@ -1,9 +1,14 @@
 use super::*;
+use crate::application::ports::OperationState;
+use std::collections::HashSet;
 
 pub(super) struct MemoryConfig(pub(super) Mutex<Config>);
 
 #[derive(Default)]
-pub(super) struct MemoryIdempotency(Mutex<HashMap<String, (String, String)>>);
+pub(super) struct MemoryIdempotency {
+    values: Mutex<HashMap<String, (String, String, OperationState)>>,
+    active: Mutex<HashSet<String>>,
+}
 
 impl IdempotencyRepository for MemoryIdempotency {
     fn reserve(
@@ -12,15 +17,99 @@ impl IdempotencyRepository for MemoryIdempotency {
         fingerprint: &str,
         job_id: &str,
     ) -> Result<crate::application::ports::Reservation, String> {
-        let mut values = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        match values.get(key_hash) {
-            Some((old, id)) if old == fingerprint => Ok(crate::application::ports::Reservation::Existing(id.clone())),
-            Some(_) => Ok(crate::application::ports::Reservation::Conflict),
+        let mut values = self.values.lock().unwrap_or_else(|e| e.into_inner());
+        match values.get(key_hash).cloned() {
+            Some((old, _, _)) if old != fingerprint => Ok(crate::application::ports::Reservation::Conflict),
+            Some((_, id, state)) => {
+                let mut active = self.active.lock().unwrap_or_else(|e| e.into_inner());
+                match state {
+                    OperationState::Reserved if active.contains(&id) => {
+                        Ok(crate::application::ports::Reservation::Pending(Some(id)))
+                    }
+                    OperationState::Reserved => {
+                        active.insert(id.clone());
+                        Ok(crate::application::ports::Reservation::Resume(id))
+                    }
+                    OperationState::Submitting if active.contains(&id) => {
+                        Ok(crate::application::ports::Reservation::Pending(Some(id)))
+                    }
+                    OperationState::Submitting => {
+                        values.get_mut(key_hash).unwrap().2 = OperationState::Unknown;
+                        Ok(crate::application::ports::Reservation::Existing(
+                            id,
+                            OperationState::Unknown,
+                        ))
+                    }
+                    _ => Ok(crate::application::ports::Reservation::Existing(id, state)),
+                }
+            }
             None => {
-                values.insert(key_hash.into(), (fingerprint.into(), job_id.into()));
-                Ok(crate::application::ports::Reservation::New)
+                values.insert(
+                    key_hash.into(),
+                    (fingerprint.into(), job_id.into(), OperationState::Reserved),
+                );
+                self.active
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(job_id.into());
+                Ok(crate::application::ports::Reservation::New(job_id.into()))
             }
         }
+    }
+
+    fn operation_state(&self, job_id: &str) -> Result<Option<OperationState>, String> {
+        Ok(self
+            .values
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .values()
+            .find(|(_, id, _)| id == job_id)
+            .map(|(_, _, state)| *state))
+    }
+
+    fn mark_submitting(&self, job_id: &str) -> Result<(), String> {
+        self.set_state(job_id, OperationState::Submitting)
+    }
+
+    fn mark_finished(&self, job_id: &str) -> Result<(), String> {
+        self.set_state(job_id, OperationState::Finished)
+    }
+
+    fn mark_unknown(&self, job_id: &str) -> Result<(), String> {
+        self.set_state(job_id, OperationState::Unknown)
+    }
+
+    fn release_reserved(&self, job_id: &str) {
+        self.active
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(job_id);
+    }
+
+    fn recover(&self, _history: &dyn HistoryRepository) -> Result<(), String> {
+        self.active.lock().unwrap_or_else(|error| error.into_inner()).clear();
+        Ok(())
+    }
+}
+
+impl MemoryIdempotency {
+    fn set_state(&self, job_id: &str, next: OperationState) -> Result<(), String> {
+        let mut values = self.values.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some((_, _, state)) = values.values_mut().find(|(_, id, _)| id == job_id) {
+            match (*state, next) {
+                (OperationState::Reserved, OperationState::Submitting)
+                | (OperationState::Reserved | OperationState::Submitting, OperationState::Finished)
+                | (_, OperationState::Unknown) => *state = next,
+                _ => {}
+            }
+        }
+        if matches!(next, OperationState::Finished | OperationState::Unknown) {
+            self.active
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .remove(job_id);
+        }
+        Ok(())
     }
 }
 
@@ -162,7 +251,9 @@ impl HistoryRepository for MemoryHistory {
         })
     }
 
-    fn prune(&self, _retention_days: u32) {}
+    fn prune(&self, _retention_days: u32) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 struct NoopJobMarker;

@@ -69,3 +69,27 @@ fn only_one_caller_can_claim_a_pending_document_for_submission() {
 
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn retention_removes_expired_documents_but_keeps_active_submissions() {
+    let root = temp_dir("incoming-retention");
+    let source = root.join("source.pdf");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(&source, b"pdf").unwrap();
+    let store = IncomingStore::new(root.join("store"));
+    let mut expired = job(uuid::Uuid::new_v4().to_string(), "old-job");
+    expired.received_at = "2001-01-01T08:00:00+07:00".into();
+    let (expired, _) = store.create(expired, &source).unwrap();
+    let mut active = job(uuid::Uuid::new_v4().to_string(), "active-job");
+    active.received_at = "2001-01-01T08:00:00+07:00".into();
+    let (active, _) = store.create(active, &source).unwrap();
+    assert!(store.claim_for_submission(&active.id, "Office").unwrap());
+
+    store.prune(0).unwrap();
+
+    assert!(store.get(&expired.id).unwrap().is_none());
+    assert!(!store.document_file(&expired.id).unwrap().exists());
+    assert_eq!(store.get(&active.id).unwrap().unwrap().state, IncomingState::Submitting);
+    assert!(store.document_file(&active.id).unwrap().is_file());
+    fs::remove_dir_all(root).unwrap();
+}

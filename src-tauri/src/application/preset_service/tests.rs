@@ -238,6 +238,7 @@ impl crate::application::ports::RemoteGateway for SharedBundleGateway {
         _path: &std::path::Path,
         _file_name: &str,
         _settings: &PrintSettings,
+        _logical_job_id: &str,
     ) -> Result<crate::domain::remote::RemotePrintResult, crate::domain::remote::RemoteError> {
         unreachable!()
     }
@@ -246,6 +247,7 @@ impl crate::application::ports::RemoteGateway for SharedBundleGateway {
         _remote: &crate::domain::remote::Remote,
         _pages: u32,
         _settings: &PrintSettings,
+        _logical_job_id: &str,
     ) -> Result<crate::domain::remote::RemotePrintResult, crate::domain::remote::RemoteError> {
         unreachable!()
     }

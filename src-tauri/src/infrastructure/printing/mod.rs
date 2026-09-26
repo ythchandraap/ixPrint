@@ -21,6 +21,32 @@ mod windows;
 #[cfg(windows)]
 use self::windows as backend;
 
+/// Interprets the native Windows `EndDoc` result without claiming physical output.
+#[cfg(any(windows, test))]
+pub(super) fn check_end_doc(result: i32) -> Result<(), String> {
+    if result > 0 {
+        Ok(())
+    } else {
+        Err("Printer driver failed to finalize the print job".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_end_doc;
+
+    #[test]
+    fn end_doc_positive_result_is_accepted() {
+        assert!(check_end_doc(1).is_ok());
+    }
+
+    #[test]
+    fn end_doc_zero_or_negative_result_is_failure() {
+        assert!(check_end_doc(0).is_err());
+        assert!(check_end_doc(-1).is_err());
+    }
+}
+
 pub fn queue(printer: &str) -> Result<PrinterQueue, String> {
     backend::queue(printer)
 }

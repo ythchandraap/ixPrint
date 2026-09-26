@@ -205,29 +205,80 @@ impl History {
     }
 
     /// Deletes day files older than `retention_days`.
-    pub fn prune(&self, retention_days: u32) {
+    pub fn prune(&self, retention_days: u32) -> Result<(), String> {
         let cutoff = (chrono::Local::now().date_naive() - chrono::Duration::days(retention_days as i64))
             .format("%Y-%m-%d")
             .to_string();
+        let mut failures = Vec::new();
+        let mut history_files = Vec::new();
+        let active_jobs = self.contents.active_jobs();
         {
             let _guard = self.lock.lock_safe();
-            for (date, path) in self.day_files() {
+            let entries = match fs::read_dir(&self.dir) {
+                Ok(entries) => Some(entries),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => return Err(format!("Could not inspect History files: {}", error)),
+            };
+            for entry in entries.into_iter().flatten() {
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(error) => {
+                        failures.push(format!("Could not inspect a History file: {}", error));
+                        continue;
+                    }
+                };
+                let path = entry.path();
+                let Some(date) = path.file_stem().and_then(|stem| stem.to_str()).map(str::to_owned) else {
+                    continue;
+                };
+                if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") || !is_date(&date) {
+                    continue;
+                }
                 if date < cutoff {
-                    let _ = fs::remove_file(path);
+                    match contains_active_job(&path, &active_jobs) {
+                        Ok(true) => history_files.push(date),
+                        Ok(false) => {
+                            if let Err(error) = fs::remove_file(path) {
+                                if error.kind() != std::io::ErrorKind::NotFound {
+                                    history_files.push(date);
+                                    failures.push(format!("Could not remove expired History metadata: {}", error));
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            history_files.push(date);
+                            failures.push(format!("Could not inspect expired History metadata: {}", error));
+                        }
+                    }
+                } else {
+                    history_files.push(date);
                 }
             }
         }
-        let retained: std::collections::HashSet<_> = self
-            .day_files()
-            .into_iter()
-            .flat_map(|(date, _)| {
-                self.read_day(&date)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(move |entry| (date.clone(), entry.id))
-            })
-            .collect();
-        self.contents.prune(&cutoff, &retained);
+        let mut retained = std::collections::HashSet::new();
+        let mut history_read_failed = false;
+        for date in history_files {
+            match self.read_day(&date) {
+                Ok(entries) => retained.extend(entries.into_iter().map(|entry| (date.clone(), entry.id))),
+                Err(error) => {
+                    history_read_failed = true;
+                    failures.push(format!(
+                        "Could not inspect retained History content references: {}",
+                        error
+                    ));
+                }
+            }
+        }
+        if !history_read_failed {
+            if let Err(error) = self.contents.prune(&retained) {
+                failures.push(format!("Could not clean History content: {}", error));
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(failures.join("; "))
+        }
     }
 
     fn day_files(&self) -> Vec<(String, PathBuf)> {
@@ -243,6 +294,16 @@ impl History {
             })
             .collect()
     }
+}
+
+fn contains_active_job(path: &Path, active_jobs: &std::collections::HashSet<String>) -> Result<bool, String> {
+    if active_jobs.is_empty() {
+        return Ok(false);
+    }
+    let contents = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    Ok(contents.lines().any(
+        |line| matches!(serde_json::from_str::<Line>(line), Ok(Line::Entry(entry)) if active_jobs.contains(&entry.id)),
+    ))
 }
 
 impl HistoryRepository for History {
@@ -270,7 +331,7 @@ impl HistoryRepository for History {
         History::days(self)
     }
 
-    fn prune(&self, retention_days: u32) {
+    fn prune(&self, retention_days: u32) -> Result<(), String> {
         History::prune(self, retention_days)
     }
 
