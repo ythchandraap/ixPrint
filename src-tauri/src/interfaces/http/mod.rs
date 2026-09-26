@@ -1,5 +1,5 @@
-pub mod auth_guard;
 mod api_access;
+pub mod auth_guard;
 pub mod cors;
 pub mod dto;
 pub mod handlers;
@@ -31,6 +31,7 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
             web::get().to(handlers::presets::export_shared_preset),
         )
         .route("/print", web::post().to(handlers::jobs::print))
+        .route("/print-ready", web::post().to(handlers::incoming::print_ready))
         .route("/preflight", web::post().to(handlers::jobs::preflight))
         .route("/test-page", web::post().to(handlers::jobs::test_page))
         .route("/templates", web::get().to(handlers::presets::templates))
@@ -101,9 +102,7 @@ async fn run_server(state: Arc<AppState>, runtime: Arc<ServerRuntime>) -> std::i
                 let state = req
                     .app_data::<web::Data<Arc<AppState>>>()
                     .map(|data| data.get_ref().clone());
-                let mut access = state
-                    .as_ref()
-                    .map(|state| api_access::request_entry(&req, state));
+                let mut access = state.as_ref().map(|state| api_access::request_entry(&req, state));
                 let future = srv.call(req);
                 async move {
                     match future.await {

@@ -76,5 +76,6 @@ pub(super) struct DataSubmission {
     pub(super) data: serde_json::Value,
     pub(super) header: Option<serde_json::Value>,
     pub(super) settings: PrintSettings,
+    pub(super) history_input: serde_json::Value,
     pub(super) callback: (Option<String>, Option<String>),
 }

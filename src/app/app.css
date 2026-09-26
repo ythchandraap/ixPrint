@@ -454,6 +454,25 @@ main {
 	grid-area: 1 / 1;
 	min-width: 0;
 }
+.incoming-review-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: 99;
+	display: grid;
+	place-items: center;
+	padding: 12px;
+	background: rgb(11 12 14 / 0.72);
+}
+.incoming-review-dialog {
+	width: min(560px, 100%);
+	max-height: min(720px, calc(100vh - 24px));
+	overflow-y: auto;
+	background: var(--bg);
+	color: var(--text);
+	border: 1px solid var(--line);
+	border-radius: var(--r-lg);
+	box-shadow: 0 12px 36px rgb(0 0 0 / 0.2);
+}
 .settings-main {
 	min-width: 0;
 }

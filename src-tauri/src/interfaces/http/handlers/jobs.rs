@@ -1,7 +1,8 @@
 use super::super::auth_guard::{acquire_in_flight, authorized};
 use super::super::dto::{error, internal, DataPrint, DataSubmission, LegacyTemplatePrint, State, MAX_RECORDS};
 use super::job_support::{
-    callback_from_query, fingerprint, idempotency_key, read_json_payload, save_upload, Submission,
+    callback_from_query, fingerprint, idempotency_key, read_json_payload, read_json_payload_with_value, save_upload,
+    Submission,
 };
 use crate::application::ports::Reservation;
 use crate::application::state::AppState;
@@ -169,6 +170,7 @@ async fn submit_data(
         data,
         header,
         settings,
+        history_input,
         callback: (callback_url, callback_ref),
     } = submission;
     let bad = |m: String| error(actix_web::http::StatusCode::BAD_REQUEST, &m);
@@ -206,6 +208,7 @@ async fn submit_data(
             records.len()
         ),
         document: Document::Data { records, header },
+        history_input: Some(history_input),
         settings,
         preset,
         source: "http",
@@ -231,8 +234,8 @@ pub(crate) async fn print_template(req: HttpRequest, state: State, body: web::By
         Ok(guard) => guard,
         Err(response) => return response,
     };
-    let body: LegacyTemplatePrint = match serde_json::from_slice(&body) {
-        Ok(b) => b,
+    let input: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(value) => value,
         Err(e) => {
             return error(
                 actix_web::http::StatusCode::BAD_REQUEST,
@@ -240,22 +243,32 @@ pub(crate) async fn print_template(req: HttpRequest, state: State, body: web::By
             )
         }
     };
-    if body.preset.as_ref().is_some_and(|p| p != &body.template) {
+    let parsed: LegacyTemplatePrint = match serde_json::from_value(input.clone()) {
+        Ok(body) => body,
+        Err(e) => {
+            return error(
+                actix_web::http::StatusCode::BAD_REQUEST,
+                &format!("JSON body is invalid: {}", e),
+            )
+        }
+    };
+    if parsed.preset.as_ref().is_some_and(|p| p != &parsed.template) {
         return error(
             actix_web::http::StatusCode::BAD_REQUEST,
             "A template is now a preset with a design: send only \"template\" (or use POST /print with \"preset\")",
         );
     }
-    let callback = (body.callback_url, body.callback_ref);
+    let callback = (parsed.callback_url, parsed.callback_ref);
     submit_data(
         &req,
         &state,
         token,
         DataSubmission {
-            preset: Some(body.template),
-            data: body.data,
-            header: body.header,
-            settings: body.settings,
+            preset: Some(parsed.template),
+            data: parsed.data,
+            header: parsed.header,
+            settings: parsed.settings,
+            history_input: input,
             callback,
         },
     )
@@ -282,7 +295,7 @@ pub(crate) async fn print(
         .is_some_and(|v| v.to_ascii_lowercase().starts_with("application/json"));
 
     if is_json {
-        let body: DataPrint = match read_json_payload(&mut payload).await {
+        let (body, history_input): (DataPrint, _) = match read_json_payload_with_value(&mut payload).await {
             Ok(body) => body,
             Err(response) => return response,
         };
@@ -296,6 +309,7 @@ pub(crate) async fn print(
                 data: body.data,
                 header: body.header,
                 settings: body.settings,
+                history_input,
                 callback,
             },
         )
@@ -318,6 +332,7 @@ pub(crate) async fn print(
     let request = JobRequest {
         job_id: None,
         document: Document::File(file.clone()),
+        history_input: None,
         file_name,
         settings,
         preset,
@@ -380,6 +395,7 @@ pub(crate) async fn test_page(
     let request = JobRequest {
         job_id: None,
         document: Document::TestPage { pages: count },
+        history_input: None,
         file_name: "ix.print test page.pdf".into(),
         settings,
         preset,

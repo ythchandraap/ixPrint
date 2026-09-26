@@ -74,6 +74,12 @@ pub(super) fn fingerprint(request: &JobRequest, callback: Option<&Callback>) -> 
 pub(super) async fn read_json_payload<T: serde::de::DeserializeOwned>(
     payload: &mut web::Payload,
 ) -> Result<T, HttpResponse> {
+    read_json_payload_with_value(payload).await.map(|(parsed, _)| parsed)
+}
+
+pub(super) async fn read_json_payload_with_value<T: serde::de::DeserializeOwned>(
+    payload: &mut web::Payload,
+) -> Result<(T, serde_json::Value), HttpResponse> {
     let mut body = web::BytesMut::new();
     while let Some(chunk) = payload.next().await {
         match chunk {
@@ -87,12 +93,19 @@ pub(super) async fn read_json_payload<T: serde::de::DeserializeOwned>(
             Err(e) => return Err(error(actix_web::http::StatusCode::BAD_REQUEST, &e.to_string())),
         }
     }
-    serde_json::from_slice(&body).map_err(|e| {
+    let value: serde_json::Value = serde_json::from_slice(&body).map_err(|e| {
         error(
             actix_web::http::StatusCode::BAD_REQUEST,
             &format!("JSON body is invalid: {}", e),
         )
-    })
+    })?;
+    let parsed = serde_json::from_value(value.clone()).map_err(|e| {
+        error(
+            actix_web::http::StatusCode::BAD_REQUEST,
+            &format!("JSON body is invalid: {}", e),
+        )
+    })?;
+    Ok((parsed, value))
 }
 
 /// Saves the first uploaded file of the multipart body; returns (path, original name).

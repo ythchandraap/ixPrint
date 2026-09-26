@@ -18,6 +18,7 @@ fn entry(time: &str, success: bool) -> HistoryEntry {
         duration_ms: 1,
         callback: None,
         remote: None,
+        content: None,
     }
 }
 
@@ -58,7 +59,21 @@ fn groups_by_day_and_prunes() {
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     h.append(&entry(&format!("{}T08:00:00+07:00", today), true)).unwrap();
     h.append(&entry(&format!("{}T09:00:00+07:00", today), false)).unwrap();
-    h.append(&entry("2001-01-01T09:00:00+07:00", true)).unwrap();
+    let mut old = entry("2001-01-01T09:00:00+07:00", true);
+    old.content = Some(HistoryContentStatus {
+        input_kind: Some(HistoryInputKind::Json),
+        input_saved: true,
+        output: HistoryOutputState::NotCreated,
+    });
+    h.append(&old).unwrap();
+    h.save_input_json(&old, &serde_json::json!({ "private": "history input" }))
+        .unwrap();
+    let old_content = dir
+        .join("history-content")
+        .join("2001-01-01")
+        .join(&old.id)
+        .join("input.json");
+    assert!(old_content.is_file());
 
     let days = h.days();
     assert_eq!(days[0].date, today);
@@ -78,6 +93,10 @@ fn groups_by_day_and_prunes() {
 
     h.prune(30);
     assert_eq!(h.days().len(), 1);
+    assert!(
+        !old_content.exists(),
+        "content follows the same history retention window"
+    );
     assert!(h.read_day("../etc").is_err());
     let _ = fs::remove_dir_all(dir);
 }
@@ -113,5 +132,59 @@ fn search_matches_job_id_and_callback_reference_across_days() {
     assert_eq!(by_id.total, 1);
     assert_eq!(by_id.entries[0].id, second.id);
     assert!(history.search("a", 1, 20).is_err());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn cancelled_incoming_jobs_are_not_counted_or_filtered_as_failures() {
+    let dir = std::env::temp_dir().join(format!("ixprint-hist-cancel-{}", uuid::Uuid::new_v4()));
+    let history = History::new(dir.clone());
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let mut cancelled = entry(&format!("{}T08:00:00+07:00", today), false);
+    cancelled.source = "incoming_cancelled_file_picker".into();
+    cancelled.error = Some("Cancelled before printing".into());
+    history.append(&cancelled).unwrap();
+    let mut failed = entry(&format!("{}T09:00:00+07:00", today), false);
+    failed.source = "incoming_file_picker".into();
+    failed.error = Some("Printer unavailable".into());
+    history.append(&failed).unwrap();
+
+    assert!(cancelled.is_cancelled());
+    assert_eq!(history.days()[0].failed, 1);
+    let failures = history.read_page(&today, 1, 10, true).unwrap();
+    assert_eq!(failures.total, 1);
+    assert_eq!(failures.entries[0].id, failed.id);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn prune_removes_orphan_jobs_and_partial_files_but_keeps_retained_content() {
+    let dir = std::env::temp_dir().join(format!("ixprint-content-prune-{}", uuid::Uuid::new_v4()));
+    let history = History::new(dir.clone());
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let mut retained = entry(&format!("{}T08:00:00+07:00", today), true);
+    retained.content = Some(HistoryContentStatus {
+        input_kind: Some(HistoryInputKind::Json),
+        input_saved: true,
+        output: HistoryOutputState::NotCreated,
+    });
+    history.append(&retained).unwrap();
+    history
+        .save_input_json(&retained, &serde_json::json!({ "retained": true }))
+        .unwrap();
+    let job_dir = dir.join("history-content").join(&today).join(&retained.id);
+    let partial = job_dir.join(".input.json.tmp-crash");
+    fs::write(&partial, b"partial").unwrap();
+    let orphan = dir
+        .join("history-content")
+        .join(&today)
+        .join(uuid::Uuid::new_v4().to_string());
+    fs::create_dir_all(&orphan).unwrap();
+    fs::write(orphan.join(".output.pdf.tmp-crash"), b"partial").unwrap();
+
+    history.prune(90);
+    assert!(job_dir.join("input.json").is_file());
+    assert!(!partial.exists());
+    assert!(!orphan.exists());
     let _ = fs::remove_dir_all(dir);
 }

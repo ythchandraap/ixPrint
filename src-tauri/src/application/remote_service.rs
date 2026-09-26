@@ -345,6 +345,7 @@ mod tests {
         let req = JobRequest {
             job_id: None,
             document: Document::File("source.pdf".into()),
+            history_input: None,
             file_name: "source.pdf".into(),
             settings: PrintSettings::default(),
             preset: None,
@@ -370,6 +371,7 @@ mod tests {
             duration_ms: 0,
             callback: None,
             remote: None,
+            content: None,
         };
         assert!(matches!(
             forward(&state, ForwardRequest {

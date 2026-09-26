@@ -58,7 +58,7 @@ fn sheet_devmode(
         } else {
             DMORIENT_PORTRAIT
         } as i16;
-        if *paper != Paper::PrinterDefault {
+        {
             let (w, h) = if exact {
                 (pt_to_mm(sheet.width_pt), pt_to_mm(sheet.height_pt))
             } else {
