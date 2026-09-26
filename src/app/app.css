@@ -183,6 +183,29 @@ pre {
 	display: flex;
 	flex-direction: column;
 }
+.app.design-workspace-active {
+	width: 100%;
+	max-width: none;
+	height: 100vh;
+	height: 100dvh;
+	min-height: 0;
+	overflow: hidden;
+}
+.design-workspace-active .page-transition-host {
+	flex: 1 1 auto;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+}
+.design-workspace-active .page-transition-host > main {
+	height: 100%;
+	min-height: 0;
+	padding: 0;
+	overflow: hidden;
+}
+.design-workspace-active .statusline {
+	flex-wrap: wrap;
+}
 /* App bar, banners and tabs stay in view while the content scrolls. */
 .top {
 	position: sticky;

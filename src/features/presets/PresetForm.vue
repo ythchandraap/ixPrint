@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import {
   api,
   errorText,
@@ -25,6 +25,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "saved", config: Config, draft: boolean): void;
   (e: "cancel"): void;
+  (e: "design-editor-active", active: boolean): void;
 }>();
 
 // Must match STANDARD_PAPERS in src-tauri/src/settings.rs.
@@ -244,6 +245,10 @@ const design = ref<Template | undefined>(
   props.settings.design ? JSON.parse(JSON.stringify(props.settings.design)) : undefined,
 );
 const editingDesign = ref(false);
+watch(editingDesign, (active) => emit("design-editor-active", active), { immediate: true });
+onBeforeUnmount(() => {
+  if (editingDesign.value) emit("design-editor-active", false);
+});
 const thumb = ref("");
 watch(
   design,
@@ -350,29 +355,37 @@ function newDesign(): Template {
   };
 }
 
-/** The design editor saves the whole preset in one go. */
-function applyDesign(d: Template) {
+/** The design editor saves the whole preset and stays open if persistence fails. */
+async function saveDesign(d: Template): Promise<boolean> {
   const isNewDesign = !design.value;
-  design.value = d;
-  editingDesign.value = false;
-  if (isNewDesign) {
-    resetPaperLayoutFields();
+  const previousPaperFields = isNewDesign
+    ? { paperMode: form.paperMode, customW: form.customW, customH: form.customH, orientation: form.orientation,
+        scaleMode: form.scaleMode, scalePercent: form.scalePercent, align: form.align, margins: [...form.margins], pages: form.pages }
+    : null;
+  if (isNewDesign) resetPaperLayoutFields();
+  const saved = await save(d);
+  if (!saved && previousPaperFields) {
+    Object.assign(form, previousPaperFields);
+    form.margins.splice(0, form.margins.length, ...previousPaperFields.margins);
   }
-  save();
+  return saved;
 }
 
-async function save() {
+async function save(designOverride?: Template): Promise<boolean> {
   error.value = "";
   saving.value = true;
   try {
-    const preset: Preset = { ...toSettings(), ...(design.value ? { design: design.value } : {}) };
+    const activeDesign = designOverride ?? design.value;
+    const preset: Preset = { ...toSettings(), ...(activeDesign ? { design: activeDesign } : {}) };
     const draft = Boolean(props.name);
     const config = draft
       ? await api.savePresetDraft(props.name!, preset)
       : await api.savePreset(form.name.trim(), preset);
     emit("saved", config, draft);
+    return true;
   } catch (e) {
     error.value = errorText(e);
+    return false;
   } finally {
     saving.value = false;
   }
@@ -388,10 +401,12 @@ async function save() {
     :template="design ?? newDesign()"
     :local-ip="localIp"
     :server-port="serverPort"
-    :apply="applyDesign"
+    :save-design="saveDesign"
+    :saving="saving"
+    :save-error="error"
     :cancel="() => (editingDesign = false)"
   />
-  <form v-else class="stack" @submit.prevent="save">
+  <form v-else class="stack" @submit.prevent="save()">
     <h3 class="section-title">{{ name ? `Edit preset "${name}"` : "New preset" }}</h3>
     <p class="hint">Fields left as "—" inherit the default or request parameters.</p>
 

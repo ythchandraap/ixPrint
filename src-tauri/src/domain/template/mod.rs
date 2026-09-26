@@ -6,6 +6,6 @@ mod pagination;
 mod record;
 
 pub use element::{Element, HAlign, ImageFit, VAlign};
-pub use model::{FooterMode, Layout, Template, AUTO_FIELDS, MAX_RECORDS};
+pub use model::{FooterMode, Layout, Template, TemplateGroup, AUTO_FIELDS, MAX_RECORDS};
 pub(crate) use pagination::{paginate, Band};
 pub use record::{fill, record_from_json, Record};

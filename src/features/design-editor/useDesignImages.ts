@@ -1,16 +1,27 @@
-import { ref, type ComputedRef, type Ref } from "vue";
+import { ref, type ComputedRef } from "vue";
 import { errorText, type Template, type TemplateElement } from "@/shared/api";
 
 const MAX_IMAGE_PX = 1600;
 const snap = (value: number) => Math.round(value / 0.5) * 0.5;
+function newElementId(template: Template) {
+  const used = new Set([...template.elements.map((element) => element.id), ...(template.groups ?? []).map((group) => group.id)]);
+  let id = "";
+  do id = crypto.randomUUID?.() ?? Math.random().toString(36).slice(2, 12);
+  while (used.has(id));
+  return id;
+}
 
-export function useDesignImages(template: Template, canvasHeight: ComputedRef<number>, selected: Ref<number | null>) {
+export function useDesignImages(
+  template: Template,
+  canvasHeight: ComputedRef<number>,
+  onCreated: (element: TemplateElement) => void,
+) {
   const fileInput = ref<HTMLInputElement | null>(null);
   const imageError = ref("");
-  let replacing: number | null = null;
+  let replacing: string | null = null;
 
-  function pickImage(index: number | null) {
-    replacing = index;
+  function pickImage(id: string | null) {
+    replacing = id;
     imageError.value = "";
     fileInput.value?.click();
   }
@@ -51,7 +62,7 @@ export function useDesignImages(template: Template, canvasHeight: ComputedRef<nu
     if (!file) return;
     try {
       const { url, width, height } = await toDataUrl(file);
-      const target: TemplateElement | undefined = replacing === null ? undefined : template.elements[replacing];
+      const target: TemplateElement | undefined = replacing === null ? undefined : template.elements.find((element) => element.id === replacing);
       if (target?.type === "image") {
         target.src = url;
         return;
@@ -64,9 +75,9 @@ export function useDesignImages(template: Template, canvasHeight: ComputedRef<nu
         elementHeight = snap(Math.max(5, designHeight - 4));
         elementWidth = snap((elementHeight * width) / height);
       }
-      template.elements.push({
+      const element: TemplateElement = {
         type: "image",
-        id: Math.random().toString(36).slice(2, 10),
+        id: newElementId(template),
         x: 2,
         y: 2,
         w: elementWidth,
@@ -74,8 +85,9 @@ export function useDesignImages(template: Template, canvasHeight: ComputedRef<nu
         src: url,
         fit: "contain",
         grayscale: false,
-      });
-      selected.value = template.elements.length - 1;
+      };
+      template.elements.push(element);
+      onCreated(element);
     } catch (error) {
       imageError.value = errorText(error);
     }
