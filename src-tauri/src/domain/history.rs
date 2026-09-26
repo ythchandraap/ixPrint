@@ -8,19 +8,14 @@ pub enum HistoryInputKind {
     Sample,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum HistoryOutputState {
+    #[default]
     NotCreated,
     Saved,
     SaveFailed,
     RemoteUnavailable,
-}
-
-impl Default for HistoryOutputState {
-    fn default() -> Self {
-        Self::NotCreated
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -65,6 +60,9 @@ pub struct HistoryEntry {
     pub success: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Stable machine-readable failure state for client recovery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<String>,
     pub duration_ms: u64,
     /// Delivery of the result callback, when the client asked for one.
     #[serde(default, skip_serializing_if = "Option::is_none")]

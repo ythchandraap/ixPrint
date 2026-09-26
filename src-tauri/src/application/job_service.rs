@@ -4,6 +4,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use crate::application::ports::JobMarker;
+use crate::application::ports::OperationState;
 use crate::application::state::AppState;
 use crate::domain::history::{HistoryContentStatus, HistoryEntry, HistoryInputKind, HistoryOutputState};
 use crate::domain::job::{design_paper, Document, JobError, JobRequest, JobResult, MAX_TEST_PAGES};
@@ -41,6 +42,7 @@ pub fn run_with_preset(
         settings: serde_json::to_value(&req.settings).unwrap_or_default(),
         success: false,
         error: None,
+        error_code: None,
         duration_ms: 0,
         callback: None,
         remote: None,
@@ -65,7 +67,7 @@ pub fn run_with_preset(
         _ => {}
     }
 
-    let result = (|| -> Result<JobResult, JobError> {
+    let mut result = (|| -> Result<JobResult, JobError> {
         let preset = if let Some(draft) = &preset_override {
             draft.clone()
         } else {
@@ -232,9 +234,63 @@ pub fn run_with_preset(
         .remove_generated_file(&state.jobs_dir.join(format!("{}-test.pdf", job_id)));
     record.success = result.is_ok();
     record.error = result.as_ref().err().map(|error| error.message().to_string());
+    record.error_code = result
+        .as_ref()
+        .err()
+        .and_then(|error| matches!(error, JobError::OutcomeUnknown { .. }).then(|| "outcome_unknown".to_string()));
     record.duration_ms = started.elapsed().as_millis() as u64;
-    if let Err(error) = state.history.append(&record) {
-        eprintln!("Failed to write history: {}", error);
+    match state.history.append(&record) {
+        Ok(()) => {
+            let state_update = if matches!(&result, Err(JobError::OutcomeUnknown { .. })) {
+                state.idempotency.mark_unknown(&job_id)
+            } else {
+                state.idempotency.mark_finished(&job_id)
+            };
+            if let Err(error) = state_update {
+                let _ = state.diagnostics.record(
+                    "error",
+                    "idempotency",
+                    "Print result was saved to History but its operation state could not be finalized",
+                    Some(&error),
+                );
+                // A later retry can recover `finished` from History. Keep the
+                // active marker clear so this process can perform that replay.
+                state.idempotency.release_reserved(&job_id);
+            }
+        }
+        Err(error) => {
+            let _ = state.diagnostics.record(
+                "error",
+                req.source,
+                "Could not save print result to History",
+                Some(&error),
+            );
+            let state_before_history_failure = state.idempotency.operation_state(&job_id).ok().flatten();
+            if matches!(
+                state_before_history_failure,
+                Some(OperationState::Submitting | OperationState::Unknown)
+            ) || result.is_ok()
+                || matches!(&result, Err(JobError::OutcomeUnknown { .. }))
+            {
+                let message =
+                    "Print submission started, but its result could not be recorded. Check History and the printer queue before creating a new job.";
+                if let Err(persist_error) = state.idempotency.mark_unknown(&job_id) {
+                    let _ = state.diagnostics.record(
+                        "error",
+                        "idempotency",
+                        "Print outcome is unknown and its state could not be persisted",
+                        Some(&persist_error),
+                    );
+                    state.idempotency.release_reserved(&job_id);
+                }
+                result = Err(JobError::OutcomeUnknown {
+                    job_id: job_id.clone(),
+                    message: message.into(),
+                });
+            } else {
+                state.idempotency.release_reserved(&job_id);
+            }
+        }
     }
     state.history.content_job_finished(&job_id);
     if let Err(error) = &result {
@@ -332,6 +388,10 @@ fn print_ready(
         tray: job.tray.as_deref(),
         dpi: job.dpi,
     };
+    state
+        .idempotency
+        .mark_submitting(&record.id)
+        .map_err(|error| format!("Could not persist print operation state: {}", error))?;
     let spooler_job = state
         .printer_gateway
         .print(&job.printer, ready, &layout.sheets, &options)?;

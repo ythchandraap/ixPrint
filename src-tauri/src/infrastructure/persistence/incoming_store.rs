@@ -1,6 +1,7 @@
 use crate::application::ports::IncomingDocumentRepository;
 use crate::domain::incoming_job::IncomingJob;
 use crate::shared::sync::LockExt;
+use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -9,6 +10,8 @@ use std::sync::Mutex;
 pub struct IncomingStore {
     root: PathBuf,
     lock: Mutex<()>,
+    active_submissions: Mutex<HashSet<String>>,
+    active_staging: Mutex<HashSet<String>>,
 }
 
 impl IncomingStore {
@@ -16,6 +19,8 @@ impl IncomingStore {
         Self {
             root,
             lock: Mutex::new(()),
+            active_submissions: Mutex::new(HashSet::new()),
+            active_staging: Mutex::new(HashSet::new()),
         }
     }
 
@@ -68,11 +73,15 @@ impl IncomingDocumentRepository for IncomingStore {
     }
 
     fn copy_to_staging(&self, id: &str, source: &Path) -> Result<PathBuf, String> {
+        validate_id(id)?;
         let source = self.canonical_file(source, 200 * 1024 * 1024)?;
         let destination = self.staging_path(id)?;
-        fs::copy(source, &destination).map_err(|_| "Could not copy the selected document".to_string())?;
-        set_private_file(&destination)?;
-        Ok(destination)
+        self.active_staging.lock_safe().insert(id.to_string());
+        let result = fs::copy(source, &destination)
+            .map_err(|_| "Could not copy the selected document".to_string())
+            .and_then(|_| set_private_file(&destination).map(|_| destination));
+        self.active_staging.lock_safe().remove(id);
+        result
     }
 
     fn discard_staging(&self, id: &str) -> Result<(), String> {
@@ -146,7 +155,11 @@ impl IncomingDocumentRepository for IncomingStore {
     fn save(&self, job: &IncomingJob) -> Result<(), String> {
         job.validate()?;
         let _guard = self.lock.lock_safe();
-        self.write_metadata(job)
+        self.write_metadata(job)?;
+        if job.state != crate::domain::incoming_job::IncomingState::Submitting {
+            self.active_submissions.lock_safe().remove(&job.id);
+        }
+        Ok(())
     }
 
     fn claim_for_submission(&self, id: &str, printer: &str) -> Result<bool, String> {
@@ -162,6 +175,7 @@ impl IncomingDocumentRepository for IncomingStore {
         job.submission_started_at = Some(chrono::Utc::now().to_rfc3339());
         job.message = None;
         self.write_metadata(&job)?;
+        self.active_submissions.lock_safe().insert(job.id.clone());
         Ok(true)
     }
 
@@ -177,19 +191,62 @@ impl IncomingDocumentRepository for IncomingStore {
 
     fn prune(&self, retention_days: u32) -> Result<(), String> {
         let _guard = self.lock.lock_safe();
+        let mut failures = Vec::new();
         let staging = self.root.join("staging");
-        if let Ok(entries) = fs::read_dir(&staging) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|extension| extension.to_str()) == Some("pdf") {
-                    let _ = fs::remove_file(path);
+        let cutoff = now_utc() - chrono::Duration::days(retention_days as i64);
+        let active_staging = self.active_staging.lock_safe().clone();
+        match fs::read_dir(&staging) {
+            Ok(entries) => {
+                for entry in entries {
+                    let entry = match entry {
+                        Ok(entry) => entry,
+                        Err(error) => {
+                            failures.push(format!("Could not inspect incoming staging files: {}", error));
+                            continue;
+                        }
+                    };
+                    let path = entry.path();
+                    let Some(id) = path.file_stem().and_then(|value| value.to_str()) else {
+                        continue;
+                    };
+                    if path.extension().and_then(|extension| extension.to_str()) != Some("pdf")
+                        || active_staging.contains(id)
+                    {
+                        continue;
+                    }
+                    let modified = match fs::metadata(&path).and_then(|metadata| metadata.modified()) {
+                        Ok(modified) => modified,
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                        Err(error) => {
+                            failures.push(format!("Could not inspect incoming staging file: {}", error));
+                            continue;
+                        }
+                    };
+                    if chrono::DateTime::<chrono::Utc>::from(modified) < cutoff {
+                        if let Err(error) = remove_file_if_present(&path) {
+                            failures.push(format!("Could not remove expired incoming staging file: {}", error));
+                        }
+                    }
                 }
             }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => failures.push(format!("Could not inspect incoming staging files: {}", error)),
         }
         let now = chrono::Utc::now();
-        let cutoff = now - chrono::Duration::days(retention_days as i64);
-        for mut job in self.list_unlocked()? {
+        let incoming_cutoff = now - chrono::Duration::days(retention_days as i64);
+        let active = self.active_submissions.lock_safe().clone();
+        let jobs = match self.list_unlocked() {
+            Ok(jobs) => jobs,
+            Err(error) => {
+                failures.push(format!("Could not inspect incoming documents: {}", error));
+                return Err(failures.join("; "));
+            }
+        };
+        for mut job in jobs {
             if job.state == crate::domain::incoming_job::IncomingState::Submitting {
+                if active.contains(&job.id) {
+                    continue;
+                }
                 let stale = job
                     .submission_started_at
                     .as_deref()
@@ -199,20 +256,45 @@ impl IncomingDocumentRepository for IncomingStore {
                     job.state = crate::domain::incoming_job::IncomingState::Failed;
                     job.submission_started_at = None;
                     job.message = Some("Submission outcome could not be confirmed after restart. Check History and the printer queue before sending this document again.".into());
-                    self.write_metadata(&job)?;
+                    if let Err(error) = self.write_metadata(&job) {
+                        failures.push(format!("stale submission cleanup failed: {}", error));
+                        continue;
+                    }
                 } else {
                     continue;
                 }
             }
             let expired = chrono::DateTime::parse_from_rfc3339(&job.received_at)
                 .ok()
-                .is_some_and(|at| at.with_timezone(&chrono::Utc) < cutoff);
+                .is_some_and(|at| at.with_timezone(&chrono::Utc) < incoming_cutoff);
             if expired {
-                let _ = fs::remove_file(self.document_file(&job.id)?);
-                let _ = fs::remove_file(self.metadata_path(&job.id)?);
+                let document = self.document_file(&job.id)?;
+                if let Err(error) = remove_file_if_present(&document) {
+                    failures.push(format!("incoming document cleanup failed: {}", error));
+                    continue;
+                }
+                if let Err(error) = remove_file_if_present(&self.metadata_path(&job.id)?) {
+                    failures.push(format!("incoming metadata cleanup failed: {}", error));
+                }
             }
         }
-        Ok(())
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(failures.join("; "))
+        }
+    }
+}
+
+fn now_utc() -> chrono::DateTime<chrono::Utc> {
+    chrono::Utc::now()
+}
+
+fn remove_file_if_present(path: &Path) -> Result<(), String> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
     }
 }
 

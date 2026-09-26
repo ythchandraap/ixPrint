@@ -6,10 +6,16 @@
 printing product, so product-facing actions and technical documentation use
 `ix.print`, while the application shell carries the parent brand.
 
-Bridges web apps to local printers: a web app POSTs a PDF to ix.print on the
-configured server port (`18032` by default), and ix.print prints it silently.
-The port can be changed in **Settings → Application bridge**. Runs on Windows
-10+, macOS and Linux (x64 and ARM64).
+Bridges web apps to local printers: an app submits a PDF or designed-preset data
+to ix.print on the configured server port (`18032` by default). ix.print hands
+the job to the operating-system print service; that does not prove that paper
+came out. The port can be changed in **Settings → Application bridge**.
+
+The release target matrix is Windows x64, macOS Intel, macOS Apple Silicon,
+and Linux x64. Those targets are not considered supported for general release
+until their installer and device checks in
+[the verification matrix](docs/release-readiness/verification-matrix.md) pass.
+Windows ARM64 and Linux ARM64 are not product targets.
 
 ## How printing works
 
@@ -17,7 +23,8 @@ The port can be changed in **Settings → Application bridge**. Runs on Windows
    default preset) → built-in defaults.
 2. **Layout** (PDFium): every page becomes exactly one sheet, with content
    already rotated, scaled and positioned. This is the same code on every OS,
-   which is why output is identical everywhere.
+   which keeps layout rules shared. The operating-system print service, driver,
+   printer and selected media can still change the physical result.
 3. **Print** 1:1: Windows renders sheets with PDFium and sends them via GDI;
    macOS/Linux hand the (vector) PDF to CUPS `lp`.
 
@@ -43,8 +50,10 @@ bun run tauri dev
 
 `build.rs` copies the PDFium library for the build target into
 `src-tauri/pdfium/lib/`, which is bundled as a resource. To fetch only one
-target: `bun run fetch-pdfium win-x64` (`win-x64`, `win-arm64`, `mac-x64`,
-`mac-arm64`, `linux-x64`, `linux-arm64`). Linux needs CUPS installed.
+target: `bun run fetch-pdfium win-x64` (`win-x64`, `mac-x64`, `mac-arm64`, or
+`linux-x64`). The fetch script verifies a pinned archive checksum and carries
+the package's license directory into the app resources. Linux needs CUPS
+installed.
 
 ### Development gates
 
@@ -87,15 +96,20 @@ module placement.
 | `GET` | `/presets/shared` | Names and design flags for presets explicitly shared over LAN |
 | `GET` | `/presets/shared/export?name=…` | One published shared preset as an importable bundle |
 
-Errors are `{message}` with status 400 (bad parameters, unknown preset or
-printer), 401 (missing/invalid token) or 500 (document or printer failure).
+Errors usually contain `{message}`. Print requests can also return 202 while an
+identical logical job is active, 409 when a key is reused with different input
+or when the result is unknown, 401 for a missing/invalid token, and 429 after
+repeated invalid-token attempts. A 409 fingerprint conflict has the existing
+`{message}` shape; an uncertain result includes `code: "outcome_unknown"`.
 For print requests, send a unique `Idempotency-Key` header (1–128 visible ASCII
 characters) per logical job. Repeating the same request with that key within
 24 hours returns the original job with `replayed: true`; changed content gives
-409. A request still being processed returns 202, so check its `job_id` before
-retrying. Reuse the key across network retries, and create a new key only for
-a deliberate new print. The key is scoped to the API token (or client IP when
-tokens are optional).
+409. A request still being processed returns 202 with its `job_id`. If the
+response is lost, retry the same request with the same key. For
+`code: "outcome_unknown"`, inspect History and the printer queue before
+deciding what to do; ix.print does not automatically print it again. Create a
+new key only for a deliberate new print. The key is scoped to the API token (or
+client IP when tokens are optional).
 Presets, tokens and the default printer can only be changed from the ix.print
 window. Interactive docs with "try it" forms: `http://<ip>:<server-port>/docs`.
 
@@ -141,6 +155,10 @@ forwarding stops after one hop.
 The connection uses ordinary HTTP on the LAN. Anyone able to intercept that
 traffic could read the remote token, so use a trusted network or an `https://`
 address behind a TLS reverse proxy.
+
+See [developer integration and troubleshooting](docs/integrations/http-api.md)
+for supported network topologies, browser Local Network Access, and runnable
+browser and LAN-server examples.
 
 ### Presets with a design
 

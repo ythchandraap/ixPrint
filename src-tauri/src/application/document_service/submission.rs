@@ -1,4 +1,5 @@
 use super::{stage_pdf, IncomingPrintResult, IncomingTargetCheck};
+use crate::application::ports::ReadyPrintRequest;
 use crate::application::state::AppState;
 use crate::domain::history::{HistoryContentStatus, HistoryEntry, HistoryInputKind, HistoryOutputState, RemoteJob};
 use crate::domain::incoming_job::{self, IncomingJob, IncomingSource, IncomingState};
@@ -251,18 +252,18 @@ fn submit_to_printer(state: &AppState, job: &IncomingJob, printer_name: &str) ->
             incoming_job::check_compatibility(&job.pages, &capabilities)?;
             let result = state
                 .remote_gateway
-                .print_ready_pdf(
-                    &remote,
-                    &path,
-                    &job.document_name,
-                    job.source,
-                    &job.id,
-                    job.copies,
-                    &printer,
-            )
+                .print_ready_pdf(ReadyPrintRequest {
+                    remote: &remote,
+                    path: &path,
+                    file_name: &job.document_name,
+                    source: job.source,
+                    source_job_id: &job.id,
+                    copies: job.copies,
+                    printer: &printer,
+                })
             .map_err(|error| match error {
                 RemoteError::BadRequest(message) => message,
-                RemoteError::Failed(message) => format!(
+                RemoteError::Failed(message) | RemoteError::OutcomeUnknown(message) => format!(
                     "The remote submission result could not be confirmed. Check {} History and printer queue before reprinting. {}",
                     remote.name, message
                 ),
@@ -301,6 +302,7 @@ fn make_history(
         settings: serde_json::Value::Null,
         success,
         error: error.clone(),
+        error_code: None,
         duration_ms,
         callback: None,
         remote: None,

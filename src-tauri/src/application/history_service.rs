@@ -37,8 +37,32 @@ pub fn set_retention(state: &AppState, days: u32) -> Result<Config, String> {
         config.history_retention_days = days;
         Ok(())
     })?;
-    state.history.prune(days);
+    prune_retained_data(state, days);
     Ok(config)
+}
+
+/// Runs the configured retention cleanup without taking down the print bridge if storage cleanup fails.
+pub fn prune_current_retention(state: &AppState) {
+    prune_retained_data(state, state.config.get().history_retention_days);
+}
+
+fn prune_retained_data(state: &AppState, days: u32) {
+    if let Err(error) = state.history.prune(days) {
+        let _ = state.diagnostics.record(
+            "error",
+            "history-retention",
+            "History retention cleanup failed",
+            Some(&error),
+        );
+    }
+    if let Err(error) = crate::application::document_service::prune(state.incoming_documents.as_ref(), days) {
+        let _ = state.diagnostics.record(
+            "error",
+            "incoming-retention",
+            "Incoming document retention cleanup failed",
+            Some(&error),
+        );
+    }
 }
 
 pub fn days(state: &AppState) -> Vec<HistoryDay> {

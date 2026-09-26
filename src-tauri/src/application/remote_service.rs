@@ -246,6 +246,13 @@ pub(crate) struct ForwardRequest<'a> {
     pub record: &'a mut HistoryEntry,
 }
 
+fn mark_remote_submission_started(state: &AppState, job_id: &str) -> Result<(), RemoteError> {
+    state
+        .idempotency
+        .mark_submitting(job_id)
+        .map_err(|error| RemoteError::Failed(format!("Could not persist print operation state: {}", error)))
+}
+
 pub(crate) fn forward(state: &AppState, request: ForwardRequest<'_>) -> Result<JobResult, JobError> {
     let ForwardRequest {
         job_id,
@@ -267,7 +274,12 @@ pub(crate) fn forward(state: &AppState, request: ForwardRequest<'_>) -> Result<J
     let generated = state.jobs_dir.join(format!("{}-remote.pdf", job_id));
     let result = (|| -> Result<RemotePrintResult, RemoteError> {
         match &req.document {
-            Document::File(path) => state.remote_gateway.print_pdf(remote, path, &req.file_name, &settings),
+            Document::File(path) => {
+                mark_remote_submission_started(state, job_id)?;
+                state
+                    .remote_gateway
+                    .print_pdf(remote, path, &req.file_name, &settings, job_id)
+            }
             Document::Data { records, header } => {
                 let design = preset.design.as_ref().ok_or_else(|| {
                     RemoteError::BadRequest(match preset_name {
@@ -287,9 +299,10 @@ pub(crate) fn forward(state: &AppState, request: ForwardRequest<'_>) -> Result<J
                     .render_template(&generated, design, records, header)
                     .map_err(RemoteError::BadRequest)?;
                 design_settings(&mut settings, design, false);
+                mark_remote_submission_started(state, job_id)?;
                 state
                     .remote_gateway
-                    .print_pdf(remote, &generated, &req.file_name, &settings)
+                    .print_pdf(remote, &generated, &req.file_name, &settings, job_id)
             }
             Document::TestPage { pages } if preset.design.is_some() => {
                 let design = preset.design.as_ref().expect("guard checked design");
@@ -299,15 +312,32 @@ pub(crate) fn forward(state: &AppState, request: ForwardRequest<'_>) -> Result<J
                     .render_template(&generated, design, &records, &design.sample)
                     .map_err(RemoteError::BadRequest)?;
                 design_settings(&mut settings, design, true);
+                mark_remote_submission_started(state, job_id)?;
                 state
                     .remote_gateway
-                    .print_pdf(remote, &generated, &req.file_name, &settings)
+                    .print_pdf(remote, &generated, &req.file_name, &settings, job_id)
             }
-            Document::TestPage { pages } => state.remote_gateway.test_page(remote, *pages, &settings),
+            Document::TestPage { pages } => {
+                mark_remote_submission_started(state, job_id)?;
+                state.remote_gateway.test_page(remote, *pages, &settings, job_id)
+            }
         }
     })();
     state.pdf_engine.remove_generated_file(&generated);
-    let result = result.map_err(RemoteError::into_job_error)?;
+    let result = result.map_err(|error| {
+        if matches!(error, RemoteError::OutcomeUnknown(_)) {
+            if let Err(persist_error) = state.idempotency.mark_unknown(job_id) {
+                let _ = state.diagnostics.record(
+                    "error",
+                    "idempotency",
+                    "Remote print outcome is unknown and its state could not be persisted",
+                    Some(&persist_error),
+                );
+                state.idempotency.release_reserved(job_id);
+            }
+        }
+        error.into_job_error(job_id)
+    })?;
     record.settings = serde_json::to_value(&settings).unwrap_or_default();
     record.sheets = result.sheets;
     record.remote = Some(RemoteJob {
@@ -325,66 +355,4 @@ pub(crate) fn forward(state: &AppState, request: ForwardRequest<'_>) -> Result<J
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::application::state::test_support::state;
-    use crate::domain::remote::Remote;
-
-    #[test]
-    fn forward_rejects_second_hop_with_existing_error() {
-        let state = state();
-        let remote = Remote {
-            id: "remote-id".into(),
-            name: "Office".into(),
-            url: "http://office.local:18032".into(),
-            token: "fxp_test-token".into(),
-            preset: None,
-            created_at: String::new(),
-        };
-        let preset = crate::domain::preset::Preset::default();
-        let req = JobRequest {
-            job_id: None,
-            document: Document::File("source.pdf".into()),
-            history_input: None,
-            file_name: "source.pdf".into(),
-            settings: PrintSettings::default(),
-            preset: None,
-            source: "http",
-            client: None,
-            token: None,
-            hop: true,
-        };
-        let mut record = HistoryEntry {
-            id: "job-id".into(),
-            time: String::new(),
-            source: "http".into(),
-            client: None,
-            token: None,
-            file_name: "source.pdf".into(),
-            preset: None,
-            printer: "Office / Printer".into(),
-            spooler_job: None,
-            sheets: 0,
-            settings: serde_json::json!({}),
-            success: false,
-            error: None,
-            duration_ms: 0,
-            callback: None,
-            remote: None,
-            content: None,
-        };
-        assert!(matches!(
-            forward(&state, ForwardRequest {
-                job_id: "job-id",
-                preset_name: None,
-                preset: &preset,
-                merged: &PrintSettings::default(),
-                req: &req,
-                remote: &remote,
-                remote_printer: "Printer",
-                record: &mut record,
-            }),
-            Err(JobError::BadRequest(message)) if message == "Forwarding between ix.print computers is limited to one hop"
-        ));
-    }
-}
+mod tests;

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ix.print browser API example</title>
+    <style>
+      body { max-width: 760px; margin: 2rem auto; padding: 0 1rem; font: 16px/1.5 system-ui, sans-serif; }
+      label { display: block; margin: 1rem 0 .3rem; font-weight: 600; }
+      input, textarea, button { box-sizing: border-box; width: 100%; padding: .7rem; font: inherit; }
+      textarea { min-height: 12rem; font-family: ui-monospace, monospace; }
+      button { margin-top: .8rem; cursor: pointer; }
+      pre { min-height: 5rem; padding: .8rem; overflow: auto; background: #f2f3f5; }
+      .hint { color: #444; }
+    </style>
+  </head>
+  <body>
+    <h1>ix.print browser API example</h1>
+    <p class="hint">Set the exact origin shown in the address bar under ix.print → Settings → API → Allowed websites. The token stays in this page's memory and is not saved.</p>
+    <label for="bridge">ix.print bridge URL</label>
+    <input id="bridge" value="http://127.0.0.1:18032" autocomplete="url">
+    <label for="token">API token</label>
+    <input id="token" type="password" autocomplete="off" spellcheck="false">
+    <label for="body">JSON body (published designed preset)</label>
+    <textarea id="body" spellcheck="false">{
+  "preset": "label-produk",
+  "data": [{ "nama": "Product A", "kode": "SKU-001" }]
+}</textarea>
+    <label for="key">Idempotency-Key for this logical job</label>
+    <input id="key" autocomplete="off" spellcheck="false">
+    <button id="new-key" type="button">Start a new logical job</button>
+    <button id="print" type="button">Run preflight, then print</button>
+    <pre id="result" aria-live="polite">Ready. No request has been sent.</pre>
+    <script>
+      const bridge = document.querySelector("#bridge");
+      const token = document.querySelector("#token");
+      const body = document.querySelector("#body");
+      const key = document.querySelector("#key");
+      const result = document.querySelector("#result");
+
+      key.value = sessionStorage.getItem("ixprint-example-key") || crypto.randomUUID();
+      sessionStorage.setItem("ixprint-example-key", key.value);
+
+      document.querySelector("#new-key").addEventListener("click", () => {
+        key.value = crypto.randomUUID();
+        sessionStorage.setItem("ixprint-example-key", key.value);
+        result.textContent = "New key created. Use this only for a deliberate new print; check History/queue first if the previous result was unknown.";
+      });
+
+      document.querySelector("#print").addEventListener("click", async () => {
+        const base = bridge.value.replace(/\/+$/, "");
+        const headers = { Authorization: `Bearer ${token.value}`, "Content-Type": "application/json" };
+        let payload;
+        try {
+          payload = JSON.parse(body.value);
+          if (!token.value) throw new Error("Enter an API token.");
+          if (!key.value) throw new Error("Enter an Idempotency-Key.");
+          sessionStorage.setItem("ixprint-example-key", key.value);
+        } catch (error) {
+          result.textContent = error.message;
+          return;
+        }
+
+        result.textContent = "Checking /preflight…";
+        try {
+          const preflightResponse = await fetch(`${base}/preflight`, {
+            method: "POST", headers, body: JSON.stringify(payload),
+          });
+          const preflight = await preflightResponse.json();
+          if (!preflightResponse.ok || preflight.valid !== true) {
+            result.textContent = JSON.stringify({ phase: "preflight", http_status: preflightResponse.status, response: preflight }, null, 2);
+            return;
+          }
+
+          const printResponse = await fetch(`${base}/print`, {
+            method: "POST",
+            headers: { ...headers, "Idempotency-Key": key.value },
+            body: JSON.stringify(payload),
+          });
+          const printed = await printResponse.json();
+          result.textContent = JSON.stringify({ http_status: printResponse.status, response: printed }, null, 2);
+          if (printResponse.status === 409 && printed.code === "outcome_unknown") {
+            result.textContent += "\nCheck ix.print History and the printer queue before starting another job. This example does not retry automatically.";
+          } else if (printResponse.status === 429) {
+            result.textContent += "\nAuthentication is rate limited. Check the token and wait before another attempt.";
+          } else if (printResponse.status === 202) {
+            result.textContent += "\nThe same logical job is still active; retain this key and use the returned job_id to check status.";
+          }
+        } catch (error) {
+          result.textContent = `${error.message}\nRequest result may be unknown. Keep this key, check History/queue, and do not create a new key until the outcome is understood.`;
+        }
+      });
+    </script>
+  </body>
+</html>

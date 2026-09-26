@@ -57,7 +57,10 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "pdfium/lib/*"
-    ]
+      "pdfium/lib"
+    ],
+    "windows": {
+      "signCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sign-windows.ps1 \"%1\""
+    }
   }
 }
