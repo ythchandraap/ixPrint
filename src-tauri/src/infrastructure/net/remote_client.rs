@@ -1,7 +1,9 @@
 use crate::application::ports::RemoteGateway;
+use crate::domain::incoming_job::IncomingSource;
 use crate::domain::printer;
 use crate::domain::remote::{
-    settings_query, Remote, RemoteError, RemotePrintResult, SharedPreset, SharedPresetListing, HOP_HEADER,
+    settings_query, ReadyPrintResult, Remote, RemoteError, RemotePrintResult, SharedPreset, SharedPresetListing,
+    HOP_HEADER,
 };
 use crate::domain::settings::PrintSettings;
 use serde::{de::DeserializeOwned, Deserialize};
@@ -276,6 +278,44 @@ fn print_pdf(
     read_response(remote, response)
 }
 
+fn print_ready_pdf(
+    remote: &Remote,
+    path: &Path,
+    file_name: &str,
+    source: IncomingSource,
+    source_job_id: &str,
+    copies: u32,
+    printer: &str,
+) -> Result<ReadyPrintResult, RemoteError> {
+    let size = fs::metadata(path).map_err(|e| request_error(remote, e))?.len();
+    if size > MAX_UPLOAD_BYTES as u64 {
+        return Err(RemoteError::BadRequest("PDF file is too large".into()));
+    }
+    let bytes = fs::read(path).map_err(|e| request_error(remote, e))?;
+    let boundary = format!("ixprint-{}", uuid::Uuid::new_v4().simple());
+    let safe_name = sanitize_filename::sanitize(file_name);
+    let mut body = Vec::with_capacity(bytes.len() + safe_name.len() + 160);
+    body.extend_from_slice(format!("--{}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{}\"\r\nContent-Type: application/pdf\r\n\r\n", boundary, safe_name).as_bytes());
+    body.extend_from_slice(&bytes);
+    body.extend_from_slice(format!("\r\n--{}--\r\n", boundary).as_bytes());
+    let source = serde_json::to_value(source)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_else(|| "system_print".into());
+    let response = with_auth(
+        agent(Duration::from_secs(120)).post(format!("{}/print-ready", remote.url)),
+        remote,
+    )
+    .header("Content-Type", format!("multipart/form-data; boundary={}", boundary))
+    .query("printer", printer)
+    .query("copies", copies.to_string())
+    .query("source", source)
+    .query("source_job_id", source_job_id)
+    .send(body)
+    .map_err(|e| request_error(remote, e))?;
+    read_response(remote, response)
+}
+
 fn test_page(remote: &Remote, pages: u32, settings: &PrintSettings) -> Result<RemotePrintResult, RemoteError> {
     let mut request = with_auth(
         agent(Duration::from_secs(60)).post(format!("{}/test-page", remote.url)),
@@ -323,6 +363,18 @@ impl RemoteGateway for RemoteClient {
     ) -> Result<RemotePrintResult, RemoteError> {
         self::print_pdf(remote, path, file_name, settings)
     }
+    fn print_ready_pdf(
+        &self,
+        remote: &Remote,
+        path: &Path,
+        file_name: &str,
+        source: IncomingSource,
+        source_job_id: &str,
+        copies: u32,
+        printer: &str,
+    ) -> Result<ReadyPrintResult, RemoteError> {
+        self::print_ready_pdf(remote, path, file_name, source, source_job_id, copies, printer)
+    }
     fn test_page(
         &self,
         remote: &Remote,
@@ -334,72 +386,4 @@ impl RemoteGateway for RemoteClient {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    use std::thread;
-
-    fn remote(url: String) -> Remote {
-        Remote {
-            id: "remote-id".into(),
-            name: "Source".into(),
-            url,
-            token: "fxp_never-log-this-token".into(),
-            preset: None,
-            created_at: String::new(),
-        }
-    }
-
-    fn serve_once(response: String) -> String {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0; 2048];
-            let _ = stream.read(&mut request);
-            let _ = stream.write_all(response.as_bytes());
-        });
-        format!("http://{}", address)
-    }
-
-    #[test]
-    fn shared_preset_client_does_not_follow_redirects_and_caps_response_size() {
-        let redirect = serve_once(
-            "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:9/private\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into(),
-        );
-        let error = RemoteClient
-            .fetch_shared_preset(&remote(redirect), "Label")
-            .unwrap_err();
-        assert!(error.to_string().contains("HTTP 302"));
-
-        let oversized = serve_once(format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            MAX_SHARED_BUNDLE_BYTES + 1
-        ));
-        let error = RemoteClient
-            .fetch_shared_preset(&remote(oversized), "Label")
-            .unwrap_err();
-        assert!(error.to_string().contains("larger than allowed"));
-    }
-
-    #[test]
-    fn shared_preset_client_never_displays_token_from_remote_error_body() {
-        let body = r#"{"message":"fxp_never-log-this-token"}"#;
-        let base = serve_once(format!(
-            "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            body.len(),
-            body
-        ));
-        let error = RemoteClient.shared_presets(&remote(base)).unwrap_err().to_string();
-        assert!(error.contains("token rejected"));
-        assert!(!error.contains("fxp_never-log-this-token"));
-
-        let unavailable = RemoteClient
-            .shared_presets(&remote("http://127.0.0.1:1".into()))
-            .unwrap_err()
-            .to_string();
-        assert!(unavailable.contains("cannot be reached"));
-        assert!(!unavailable.contains("fxp_never-log-this-token"));
-    }
-}
+mod tests;

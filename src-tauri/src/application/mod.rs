@@ -1,6 +1,7 @@
-pub mod callback_service;
 pub mod api_access_service;
+pub mod callback_service;
 pub mod diagnostics_service;
+pub mod document_service;
 pub mod history_service;
 pub mod job_service;
 pub mod ports;

@@ -1,5 +1,5 @@
 import { invoke } from "../client";
-import type { Config, HistoryDay, HistoryPage } from "../types";
+import type { Config, HistoryContentDetail, HistoryDay, HistoryPage, HistoryPdfPage } from "../types";
 
 export const historyCommands = {
   retryCallback: (jobId: string) => invoke<void>("retry_callback", { jobId }),
@@ -11,4 +11,7 @@ export const historyCommands = {
     invoke<HistoryPage>("history_page", { date, page, perPage, failedOnly }),
   searchHistory: (query: string, page: number, perPage: number) =>
     invoke<HistoryPage>("search_history", { query, page, perPage }),
+  historyContent: (jobId: string) => invoke<HistoryContentDetail>("history_content", { jobId }),
+  historyPdfPage: (jobId: string, document: "input" | "output", page: number) =>
+    invoke<HistoryPdfPage>("history_pdf_page", { jobId, document, page }),
 };

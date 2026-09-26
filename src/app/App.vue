@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted, ref } from "vue";
 import { ArrowLeft, MonitorX } from "lucide-vue-next";
 import AppHeader from "./AppHeader.vue";
 import { useAppShell } from "./useAppShell";
@@ -8,6 +9,7 @@ import PresetsTab from "@/features/presets/PresetsTab.vue";
 import DesignEditor from "@/features/design-editor/DesignEditor.vue";
 import HistoryTab from "@/features/history/HistoryTab.vue";
 import PrintTab from "@/features/print/PrintTab.vue";
+import IncomingReview from "@/features/print/IncomingReview.vue";
 import ApiTab from "@/features/api-tokens/ApiTab.vue";
 import RemotesPanel from "@/features/remotes/RemotesPanel.vue";
 import ErrorLogPanel from "@/features/diagnostics/ErrorLogPanel.vue";
@@ -15,6 +17,51 @@ import ApiAccessLogPanel from "@/features/diagnostics/ApiAccessLogPanel.vue";
 import SettingsView from "@/features/settings/SettingsView.vue";
 import EmptyState from "@/shared/ui/EmptyState.vue";
 import OnboardingDialog from "@/features/settings/OnboardingDialog.vue";
+import { api } from "@/shared/api";
+
+const incomingJobId = ref("");
+const knownIncomingIds = new Set<string>();
+let incomingPollTimer: number | undefined;
+let incomingInitialLoad = true;
+let reviewReturnFocus: HTMLElement | null = null;
+
+async function refreshIncomingJobs() {
+  try {
+    const jobs = await api.incomingDocuments();
+    const pending = jobs.filter((job) => job.state === "awaiting_destination" || job.state === "submitting");
+    if (incomingInitialLoad) {
+      incomingInitialLoad = false;
+      jobs.forEach((job) => knownIncomingIds.add(job.id));
+      if (!incomingJobId.value) incomingJobId.value = pending[0]?.id ?? "";
+      return;
+    }
+    const newlyReceived = pending.find((job) => !knownIncomingIds.has(job.id));
+    jobs.forEach((job) => knownIncomingIds.add(job.id));
+    if (!incomingJobId.value && newlyReceived) incomingJobId.value = newlyReceived.id;
+  } catch {
+    // Keep the current screen; the next poll retries without interrupting the user.
+  }
+}
+
+function reviewIncoming(id: string) {
+  if (!incomingJobId.value && document.activeElement instanceof HTMLElement) {
+    reviewReturnFocus = document.activeElement;
+  }
+  knownIncomingIds.add(id);
+  incomingJobId.value = id;
+}
+
+function closeIncomingReview() {
+  incomingJobId.value = "";
+  requestAnimationFrame(() => reviewReturnFocus?.focus());
+  reviewReturnFocus = null;
+}
+
+onMounted(() => {
+  void refreshIncomingJobs();
+  incomingPollTimer = window.setInterval(() => void refreshIncomingJobs(), 2500);
+});
+onBeforeUnmount(() => window.clearInterval(incomingPollTimer));
 
 const {
   PRODUCT,
@@ -74,7 +121,7 @@ const {
 
 <template>
   <div class="app">
-    <div class="top">
+    <div class="top" :inert="!!incomingJobId">
       <AppHeader
         :product="PRODUCT"
         :in-app="inApp"
@@ -102,7 +149,9 @@ const {
           :title="settingsMenu ? 'Back to Settings' : 'Back to app'"
           :aria-label="settingsMenu ? 'Back to Settings' : 'Back to app'"
           @click="backFromSettings"
-        ><ArrowLeft :size="18" /></button>
+        >
+          <ArrowLeft :size="18" />
+        </button>
         <strong>{{ settingsTitle }}</strong>
       </nav>
       <nav v-else class="tabs">
@@ -112,7 +161,7 @@ const {
       </nav>
     </div>
 
-    <div class="page-transition-host">
+    <div class="page-transition-host" :inert="!!incomingJobId">
       <Transition name="page" :css="navigationStarted">
         <main v-if="!inApp" key="browser-page">
           <EmptyState
@@ -142,7 +191,12 @@ const {
             @printers-changed="refreshPrinters"
           >
             <template #diagnostics="{ showSystemLogs, activeLog }">
-              <ErrorLogPanel v-if="activeLog === 'error-log'" :show-system-logs="showSystemLogs" @copy="copy" @notify="notify" />
+              <ErrorLogPanel
+                v-if="activeLog === 'error-log'"
+                :show-system-logs="showSystemLogs"
+                @copy="copy"
+                @notify="notify"
+              />
               <ApiAccessLogPanel v-else @copy="copy" @notify="notify" />
             </template>
             <template #api="{ config: settingsConfig, localIp: settingsLocalIp }">
@@ -183,6 +237,7 @@ const {
             @printers="selectTab('printers')"
             @select-printer="selectedPrinter = $event"
             @test-pages="setTestPages"
+            @incoming="reviewIncoming"
           />
           <PrintersTab
             v-else-if="tab === 'printers'"
@@ -227,7 +282,18 @@ const {
       </Transition>
     </div>
 
-    <footer class="colophon">
+    <div v-if="incomingJobId" class="incoming-review-backdrop">
+      <section class="incoming-review-dialog" role="dialog" aria-modal="true" aria-label="Pemeriksaan tujuan">
+        <IncomingReview
+          :initial-job-id="incomingJobId"
+          :printers="printers"
+          @close="closeIncomingReview"
+          @refresh-printers="refreshPrinters(true)"
+        />
+      </section>
+    </div>
+
+    <footer class="colophon" :inert="!!incomingJobId">
       <span>{{ PRODUCT }}{{ version ? ` ${version}` : "" }}{{ osLabel ? ` · ${osLabel}` : "" }}</span>
       <span class="grow"></span>
       <span>IX Systems / {{ BRAND }}</span>

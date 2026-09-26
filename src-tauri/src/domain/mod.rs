@@ -3,6 +3,7 @@ pub mod auth;
 pub mod callback;
 pub mod diagnostics;
 pub mod history;
+pub mod incoming_job;
 pub mod job;
 pub mod layout;
 pub mod preset;

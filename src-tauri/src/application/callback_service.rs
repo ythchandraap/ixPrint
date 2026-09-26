@@ -344,6 +344,7 @@ mod tests {
             duration_ms: 1,
             callback: None,
             remote: None,
+            content: None,
         };
         app.history.append(&entry).unwrap();
         app.history
