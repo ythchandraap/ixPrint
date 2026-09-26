@@ -4,6 +4,7 @@ use crate::domain::api_access::ApiAccessEntry;
 use crate::domain::callback::{Attempt, Callback, Payload};
 use crate::domain::diagnostics::DiagnosticEntry;
 use crate::domain::history::{CallbackStatus, HistoryDay, HistoryEntry, HistoryPage};
+use crate::domain::incoming_job::IncomingJob;
 use crate::domain::layout::{LayoutResult, Sheet};
 use crate::domain::printer::{Capabilities, DeviceOptions, JobStatus, Printer, PrinterQueue};
 use crate::domain::printer_admin::{Device, Driver, NewPrinter, PrinterDetails, PrinterEdit};
@@ -19,6 +20,48 @@ use std::sync::Mutex;
 
 mod stores;
 use stores::{MemoryApiAccessLog, MemoryConfig, MemoryDiagnostics, MemoryHistory, MemoryIdempotency, MemoryRemotes};
+
+#[derive(Default)]
+struct EmptyIncomingDocuments;
+
+impl IncomingDocumentRepository for EmptyIncomingDocuments {
+    fn create(&self, _job: IncomingJob, _source: &Path) -> Result<(IncomingJob, bool), String> {
+        Err("Incoming document storage is unavailable in test state".into())
+    }
+    fn canonical_file(&self, _path: &Path, _max_bytes: u64) -> Result<PathBuf, String> {
+        Err("Incoming document storage is unavailable in test state".into())
+    }
+    fn staging_path(&self, _id: &str) -> Result<PathBuf, String> {
+        Err("Incoming document storage is unavailable in test state".into())
+    }
+    fn copy_to_staging(&self, _id: &str, _source: &Path) -> Result<PathBuf, String> {
+        Err("Incoming document storage is unavailable in test state".into())
+    }
+    fn discard_staging(&self, _id: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn list(&self) -> Result<Vec<IncomingJob>, String> {
+        Ok(Vec::new())
+    }
+    fn get(&self, _id: &str) -> Result<Option<IncomingJob>, String> {
+        Ok(None)
+    }
+    fn document_path(&self, _id: &str) -> Result<PathBuf, String> {
+        Err("Incoming document storage is unavailable in test state".into())
+    }
+    fn save(&self, _job: &IncomingJob) -> Result<(), String> {
+        Err("Incoming document storage is unavailable in test state".into())
+    }
+    fn claim_for_submission(&self, _id: &str, _printer: &str) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn remove_document(&self, _id: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn prune(&self, _retention_days: u32) -> Result<(), String> {
+        Ok(())
+    }
+}
 
 #[derive(Default)]
 struct EmptyPrinter;
@@ -122,6 +165,9 @@ impl PdfEngine for UnavailablePdf {
     fn render_page_png(&self, _path: &Path, _page: usize, _scale: f32) -> Result<Vec<u8>, String> {
         Err("PDF engine unavailable in test state".into())
     }
+    fn page_count(&self, _path: &Path) -> Result<usize, String> {
+        Err("PDF engine unavailable in test state".into())
+    }
     fn test_page(&self, _path: &Path, _w: f32, _h: f32, _info: &[String], _pages: u32) -> Result<(), String> {
         Err("PDF engine unavailable in test state".into())
     }
@@ -217,6 +263,7 @@ pub fn state() -> Arc<AppState> {
         failed_auth: FailedAttempts::default(),
         history: Arc::new(MemoryHistory::default()),
         idempotency: Arc::new(MemoryIdempotency::default()),
+        incoming_documents: Arc::new(EmptyIncomingDocuments),
         diagnostics: Arc::new(MemoryDiagnostics::default()),
         api_access_log: Arc::new(MemoryApiAccessLog::default()),
         printer_gateway: Arc::new(EmptyPrinter),

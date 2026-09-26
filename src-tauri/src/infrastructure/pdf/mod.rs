@@ -1,4 +1,5 @@
 pub mod canvas;
+mod image_pdf;
 pub mod layout_engine;
 mod template_draw;
 pub mod template_render;
@@ -59,6 +60,46 @@ impl PdfEngine for PdfEngineAdapter {
             .load_pdf_from_file(path, None)
             .map_err(|e| format!("Could not open the laid-out sheet: {}", e))?;
         template_render::render_page_png(&doc, page, px_per_mm)
+    }
+
+    fn page_count(&self, path: &Path) -> Result<usize, String> {
+        let pdfium = layout_engine::pdfium()?;
+        let doc = pdfium
+            .load_pdf_from_file(path, None)
+            .map_err(|e| format!("Could not open PDF: {}", e))?;
+        Ok(doc.pages().len() as usize)
+    }
+
+    fn page_sizes(&self, path: &Path) -> Result<Vec<crate::domain::incoming_job::PageMedia>, String> {
+        use std::io::Read;
+        let mut file = std::fs::File::open(path).map_err(|_| "Could not read the selected PDF".to_string())?;
+        let mut header = [0_u8; 1024];
+        let length = file
+            .read(&mut header)
+            .map_err(|_| "Could not read the selected PDF".to_string())?;
+        if !header[..length].windows(5).any(|window| window == b"%PDF-") {
+            return Err("The selected file is not a valid PDF".into());
+        }
+        let pdfium = layout_engine::pdfium()?;
+        let doc = pdfium
+            .load_pdf_from_file(path, None)
+            .map_err(|e| format!("Could not open PDF: {}", e))?;
+        let mut sizes = Vec::with_capacity(doc.pages().len() as usize);
+        for index in 0..doc.pages().len() {
+            let page = doc
+                .pages()
+                .get(index)
+                .map_err(|e| format!("Could not read page {}: {}", index + 1, e))?;
+            sizes.push(crate::domain::incoming_job::PageMedia {
+                width_pt: page.width().value,
+                height_pt: page.height().value,
+            });
+        }
+        Ok(sizes)
+    }
+
+    fn image_to_pdf(&self, source: &Path, output: &Path) -> Result<(), String> {
+        image_pdf::convert(source, output)
     }
 
     fn test_page(&self, path: &Path, width_mm: f32, height_mm: f32, info: &[String], pages: u32) -> Result<(), String> {

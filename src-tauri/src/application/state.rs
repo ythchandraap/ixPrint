@@ -4,7 +4,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::application::ports::{
     ApiAccessLogRepository, CallbackSender, Clock, ConfigRepository, DiagnosticsRepository, HistoryRepository,
-    IdempotencyRepository, PdfEngine, PrinterAdmin, PrinterGateway, RemoteGateway, RemoteRepository, ServerControl,
+    IdempotencyRepository, IncomingDocumentRepository, PdfEngine, PrinterAdmin, PrinterGateway, RemoteGateway,
+    RemoteRepository, ServerControl,
 };
 use crate::application::security::{FailedAttempts, InFlight, TokenUsage};
 use crate::domain::remote::CacheEntry;
@@ -21,6 +22,7 @@ pub struct AppState {
     pub failed_auth: FailedAttempts,
     pub history: Arc<dyn HistoryRepository>,
     pub idempotency: Arc<dyn IdempotencyRepository>,
+    pub incoming_documents: Arc<dyn IncomingDocumentRepository>,
     pub diagnostics: Arc<dyn DiagnosticsRepository>,
     pub api_access_log: Arc<dyn ApiAccessLogRepository>,
     pub printer_gateway: Arc<dyn PrinterGateway>,

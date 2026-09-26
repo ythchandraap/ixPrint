@@ -7,11 +7,13 @@ use serde_json::Value;
 use crate::domain::api_access::ApiAccessEntry;
 use crate::domain::callback::{Attempt, Callback, Payload};
 use crate::domain::diagnostics::DiagnosticEntry;
-use crate::domain::history::{CallbackStatus, HistoryDay, HistoryEntry, HistoryPage};
+use crate::domain::history::{CallbackStatus, HistoryDay, HistoryEntry, HistoryPage, HistoryPdfKind};
+use crate::domain::incoming_job::IncomingJob;
+use crate::domain::incoming_job::IncomingSource;
 use crate::domain::layout::{LayoutResult, Sheet};
 use crate::domain::printer::{Capabilities, DeviceOptions, JobStatus, Printer, PrinterQueue};
 use crate::domain::printer_admin::{Device, Driver, NewPrinter, PrinterDetails, PrinterEdit};
-use crate::domain::remote::{Remote, RemoteError, RemotePrintResult, SharedPresetListing};
+use crate::domain::remote::{ReadyPrintResult, Remote, RemoteError, RemotePrintResult, SharedPresetListing};
 use crate::domain::settings::{JobSettings, PrintSettings};
 use crate::domain::settings_config::Config;
 use crate::domain::template::{Record, Template};
@@ -48,6 +50,38 @@ pub trait HistoryRepository: Send + Sync {
     fn search(&self, query: &str, page: usize, per_page: usize) -> Result<HistoryPage, String>;
     fn days(&self) -> Vec<HistoryDay>;
     fn prune(&self, retention_days: u32);
+    fn content_job_started(&self, _job_id: &str) {}
+    fn content_job_finished(&self, _job_id: &str) {}
+    fn save_input_json(&self, _entry: &HistoryEntry, _value: &Value) -> Result<(), String> {
+        Err("History content storage is unavailable".into())
+    }
+    fn save_input_pdf(&self, _entry: &HistoryEntry, _source: &Path) -> Result<(), String> {
+        Err("History content storage is unavailable".into())
+    }
+    fn save_output_pdf(&self, _entry: &HistoryEntry, _source: &Path) -> Result<(), String> {
+        Err("History content storage is unavailable".into())
+    }
+    fn read_input_json(&self, _entry: &HistoryEntry) -> Result<Option<Value>, String> {
+        Ok(None)
+    }
+    fn pdf_path(&self, _entry: &HistoryEntry, _kind: HistoryPdfKind) -> Result<Option<PathBuf>, String> {
+        Ok(None)
+    }
+}
+
+pub trait IncomingDocumentRepository: Send + Sync {
+    fn create(&self, job: IncomingJob, source: &Path) -> Result<(IncomingJob, bool), String>;
+    fn canonical_file(&self, path: &Path, max_bytes: u64) -> Result<PathBuf, String>;
+    fn staging_path(&self, id: &str) -> Result<PathBuf, String>;
+    fn copy_to_staging(&self, id: &str, source: &Path) -> Result<PathBuf, String>;
+    fn discard_staging(&self, id: &str) -> Result<(), String>;
+    fn list(&self) -> Result<Vec<IncomingJob>, String>;
+    fn get(&self, id: &str) -> Result<Option<IncomingJob>, String>;
+    fn document_path(&self, id: &str) -> Result<PathBuf, String>;
+    fn save(&self, job: &IncomingJob) -> Result<(), String>;
+    fn claim_for_submission(&self, id: &str, printer: &str) -> Result<bool, String>;
+    fn remove_document(&self, id: &str) -> Result<(), String>;
+    fn prune(&self, retention_days: u32) -> Result<(), String>;
 }
 
 pub trait JobMarker: Send + Sync {}
@@ -121,6 +155,13 @@ pub trait PdfEngine: Send + Sync {
     ) -> Result<(Vec<Vec<u8>>, usize), String>;
     fn preview_png(&self, template: &Template, record: &Record, px_per_mm: f32) -> Result<Vec<u8>, String>;
     fn render_page_png(&self, path: &Path, page: usize, px_per_mm: f32) -> Result<Vec<u8>, String>;
+    fn page_count(&self, path: &Path) -> Result<usize, String>;
+    fn page_sizes(&self, _path: &Path) -> Result<Vec<crate::domain::incoming_job::PageMedia>, String> {
+        Err("Page size inspection is unavailable".into())
+    }
+    fn image_to_pdf(&self, _source: &Path, _output: &Path) -> Result<(), String> {
+        Err("Image conversion is unavailable".into())
+    }
     fn test_page(&self, path: &Path, width_mm: f32, height_mm: f32, info: &[String], pages: u32) -> Result<(), String>;
     fn remove_generated_file(&self, path: &Path);
 }
@@ -139,6 +180,20 @@ pub trait RemoteGateway: Send + Sync {
         file_name: &str,
         settings: &PrintSettings,
     ) -> Result<RemotePrintResult, RemoteError>;
+    fn print_ready_pdf(
+        &self,
+        _remote: &Remote,
+        _path: &Path,
+        _file_name: &str,
+        _source: IncomingSource,
+        _source_job_id: &str,
+        _copies: u32,
+        _printer: &str,
+    ) -> Result<ReadyPrintResult, RemoteError> {
+        Err(RemoteError::Failed(
+            "Ready-PDF forwarding is unavailable on this remote adapter".into(),
+        ))
+    }
     fn test_page(
         &self,
         remote: &Remote,

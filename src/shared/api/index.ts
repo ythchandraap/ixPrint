@@ -8,6 +8,7 @@ import { remoteCommands } from "./commands/remotes";
 import { historyCommands } from "./commands/history";
 import { diagnosticCommands } from "./commands/diagnostics";
 import { printCommands } from "./commands/print";
+import { incomingCommands } from "./commands/incoming";
 
 export const api = {
   ...appCommands,
@@ -20,6 +21,7 @@ export const api = {
   ...historyCommands,
   ...diagnosticCommands,
   ...printCommands,
+  ...incomingCommands,
 };
 
 export { errorText, isInApp } from "./client";

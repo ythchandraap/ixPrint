@@ -1,10 +1,11 @@
+use super::history_content_store::HistoryContentStore;
 use crate::application::ports::HistoryRepository;
 use crate::domain::history::*;
 use crate::shared::sync::LockExt;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 #[derive(Serialize, Deserialize)]
@@ -24,6 +25,7 @@ enum Line {
 
 pub struct History {
     dir: PathBuf,
+    contents: HistoryContentStore,
     lock: Mutex<()>,
 }
 
@@ -33,8 +35,14 @@ fn is_date(s: &str) -> bool {
 
 impl History {
     pub fn new(dir: PathBuf) -> History {
+        let content_dir = dir.join("history-content");
+        Self::with_content_dir(dir, content_dir)
+    }
+
+    pub fn with_content_dir(dir: PathBuf, content_dir: PathBuf) -> History {
         History {
             dir,
+            contents: HistoryContentStore::new(content_dir),
             lock: Mutex::new(()),
         }
     }
@@ -125,9 +133,9 @@ impl History {
         failed_only: bool,
     ) -> Result<HistoryPage, String> {
         let all = self.read_day(date)?;
-        let failed = all.iter().filter(|e| !e.success).count();
+        let failed = all.iter().filter(|e| !e.success && !e.is_cancelled()).count();
         let list: Vec<HistoryEntry> = if failed_only {
-            all.into_iter().filter(|e| !e.success).collect()
+            all.into_iter().filter(|e| !e.success && !e.is_cancelled()).collect()
         } else {
             all
         };
@@ -165,7 +173,10 @@ impl History {
         let pages = matches.len().div_ceil(per_page).max(1);
         let page = page.clamp(1, pages);
         let total = matches.len();
-        let failed = matches.iter().filter(|entry| !entry.success).count();
+        let failed = matches
+            .iter()
+            .filter(|entry| !entry.success && !entry.is_cancelled())
+            .count();
         Ok(HistoryPage {
             entries: matches.into_iter().skip((page - 1) * per_page).take(per_page).collect(),
             total,
@@ -185,7 +196,7 @@ impl History {
             .map(|date| {
                 let entries = self.read_day(&date).unwrap_or_default();
                 HistoryDay {
-                    failed: entries.iter().filter(|e| !e.success).count(),
+                    failed: entries.iter().filter(|e| !e.success && !e.is_cancelled()).count(),
                     total: entries.len(),
                     date,
                 }
@@ -198,12 +209,25 @@ impl History {
         let cutoff = (chrono::Local::now().date_naive() - chrono::Duration::days(retention_days as i64))
             .format("%Y-%m-%d")
             .to_string();
-        let _guard = self.lock.lock_safe();
-        for (date, path) in self.day_files() {
-            if date < cutoff {
-                let _ = fs::remove_file(path);
+        {
+            let _guard = self.lock.lock_safe();
+            for (date, path) in self.day_files() {
+                if date < cutoff {
+                    let _ = fs::remove_file(path);
+                }
             }
         }
+        let retained: std::collections::HashSet<_> = self
+            .day_files()
+            .into_iter()
+            .flat_map(|(date, _)| {
+                self.read_day(&date)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(move |entry| (date.clone(), entry.id))
+            })
+            .collect();
+        self.contents.prune(&cutoff, &retained);
     }
 
     fn day_files(&self) -> Vec<(String, PathBuf)> {
@@ -248,6 +272,34 @@ impl HistoryRepository for History {
 
     fn prune(&self, retention_days: u32) {
         History::prune(self, retention_days)
+    }
+
+    fn content_job_started(&self, job_id: &str) {
+        self.contents.job_started(job_id)
+    }
+
+    fn content_job_finished(&self, job_id: &str) {
+        self.contents.job_finished(job_id)
+    }
+
+    fn save_input_json(&self, entry: &HistoryEntry, value: &serde_json::Value) -> Result<(), String> {
+        self.contents.save_json(entry, value)
+    }
+
+    fn save_input_pdf(&self, entry: &HistoryEntry, source: &Path) -> Result<(), String> {
+        self.contents.save_pdf(entry, HistoryPdfKind::Input, source)
+    }
+
+    fn save_output_pdf(&self, entry: &HistoryEntry, source: &Path) -> Result<(), String> {
+        self.contents.save_pdf(entry, HistoryPdfKind::Output, source)
+    }
+
+    fn read_input_json(&self, entry: &HistoryEntry) -> Result<Option<serde_json::Value>, String> {
+        self.contents.read_json(entry)
+    }
+
+    fn pdf_path(&self, entry: &HistoryEntry, kind: HistoryPdfKind) -> Result<Option<PathBuf>, String> {
+        self.contents.pdf_path(entry, kind)
     }
 }
 

@@ -1,5 +1,44 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryInputKind {
+    Json,
+    Pdf,
+    Sample,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryOutputState {
+    NotCreated,
+    Saved,
+    SaveFailed,
+    RemoteUnavailable,
+}
+
+impl Default for HistoryOutputState {
+    fn default() -> Self {
+        Self::NotCreated
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct HistoryContentStatus {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_kind: Option<HistoryInputKind>,
+    #[serde(default)]
+    pub input_saved: bool,
+    #[serde(default)]
+    pub output: HistoryOutputState,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HistoryPdfKind {
+    Input,
+    Output,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct HistoryEntry {
     pub id: String,
@@ -33,9 +72,16 @@ pub struct HistoryEntry {
     /// Set when the job was forwarded to another ix.print.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote: Option<RemoteJob>,
+    /// Availability metadata only; payloads are stored separately from JSONL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<HistoryContentStatus>,
 }
 
 impl HistoryEntry {
+    pub fn is_cancelled(&self) -> bool {
+        self.source.starts_with("incoming_cancelled_")
+    }
+
     pub fn matches_query(&self, query: &str) -> bool {
         let query = query.to_lowercase();
         [

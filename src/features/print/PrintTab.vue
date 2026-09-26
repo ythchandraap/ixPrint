@@ -30,6 +30,7 @@ const emit = defineEmits<{
   (e: "printers"): void;
   (e: "select-printer", name: string): void;
   (e: "test-pages", pages: number): void;
+  (e: "incoming", jobId: string): void;
 }>();
 
 type Source = "preset" | "pdf";
@@ -66,15 +67,14 @@ const printer = computed({
   get: () => props.selectedPrinter,
   set: (name: string) => emit("select-printer", name),
 });
-const copies = ref(selectedPreset.value?.copies ?? 1);
-const copiesTouched = ref(false);
+const fileCopies = ref(1);
 const pdfPath = ref("");
+const fileName = computed(() => pdfPath.value.split(/[\\/]/).pop() ?? "");
 const busy = ref(false);
 const submitError = ref("");
 
 watch(preset, (name) => {
   const current = name ? props.config.presets[name] : undefined;
-  if (!copiesTouched.value) copies.value = current?.copies ?? 1;
   if (current) {
     try {
       localStorage.setItem("ixprint.testSource", name);
@@ -138,59 +138,23 @@ const currentSettings = computed(() => {
   return settingsSummary(selectedPreset.value, source.value === "preset", !!selectedPreset.value.design);
 });
 
-const pdfName = computed(() => pdfPath.value.split(/[\\/]/).pop() ?? "");
-async function choosePdf() {
+async function chooseFile() {
   let result: string | string[] | null;
   try {
-    result = await open({ multiple: false, filters: [{ name: "Dokumen PDF", extensions: ["pdf"] }] });
+    result = await open({ multiple: false, filters: [{ name: "Dokumen", extensions: ["pdf", "png", "jpg", "jpeg"] }] });
   } catch (error) {
     submitError.value = `Tidak dapat membuka pemilih file: ${errorText(error)}`;
     return;
   }
   if (typeof result !== "string") return;
-  if (!result.toLowerCase().endsWith(".pdf")) {
+  if (!/\.(pdf|png|jpe?g)$/i.test(result)) {
     pdfPath.value = "";
-    submitError.value = "Pilih file dengan ekstensi .pdf.";
+    submitError.value = "Pilih satu file PDF, PNG, JPG, atau JPEG.";
     return;
   }
   pdfPath.value = result;
   submitError.value = "";
 }
-
-// ---- PDF preview (first sheet, laid out exactly like the real print job) --
-const pdfPreview = ref("");
-const pdfPreviewLoading = ref(false);
-const pdfPreviewError = ref("");
-let previewTimer: number | undefined;
-let previewSeq = 0;
-
-watch([source, pdfPath, preset, printer], ([sourceValue, path, presetName, printerName]) => {
-  clearTimeout(previewTimer);
-  if (sourceValue !== "pdf" || !path) {
-    pdfPreview.value = "";
-    pdfPreviewError.value = "";
-    pdfPreviewLoading.value = false;
-    return;
-  }
-  pdfPreviewLoading.value = true;
-  previewTimer = window.setTimeout(async () => {
-    const seq = ++previewSeq;
-    try {
-      const settings: PrintSettings = {};
-      if (printerName) settings.printer = printerName;
-      const url = await api.previewPdfSheet(path, presetName || null, settings);
-      if (seq !== previewSeq) return;
-      pdfPreview.value = url;
-      pdfPreviewError.value = "";
-    } catch (error) {
-      if (seq !== previewSeq) return;
-      pdfPreview.value = "";
-      pdfPreviewError.value = errorText(error);
-    } finally {
-      if (seq === previewSeq) pdfPreviewLoading.value = false;
-    }
-  }, 300);
-});
 
 const validationErrors = computed(() => {
   const errors: string[] = [];
@@ -201,14 +165,12 @@ const validationErrors = computed(() => {
     if (!Number.isInteger(props.testPages) || props.testPages < 1 || props.testPages > 50)
       errors.push("Jumlah halaman sample/kalibrasi harus 1–50.");
   } else {
-    if (!pdfPath.value) errors.push("Pilih file PDF terlebih dahulu.");
-    else if (!pdfPath.value.toLowerCase().endsWith(".pdf")) errors.push("Pilih file dengan ekstensi .pdf.");
-    if (presetRemoved.value)
-      errors.push(`Preset “${preset.value}” sudah tidak tersedia. Pilih preset lain atau Tanpa preset.`);
-    if (!Number.isInteger(copies.value) || copies.value < 1 || copies.value > 999)
+    if (!pdfPath.value) errors.push("Pilih file terlebih dahulu.");
+    else if (!/\.(pdf|png|jpe?g)$/i.test(pdfPath.value)) errors.push("Pilih file PDF, PNG, JPG, atau JPEG.");
+    if (!Number.isInteger(fileCopies.value) || fileCopies.value < 1 || fileCopies.value > 999)
       errors.push("Jumlah salinan PDF harus 1–999.");
   }
-  return [...errors, ...printerErrors.value];
+  return source.value === "preset" ? [...errors, ...printerErrors.value] : errors;
 });
 const showNoPresetErrors = computed(() => source.value === "preset" && !names.value.length);
 
@@ -255,9 +217,9 @@ async function submit() {
     if (submittedSource === "preset") {
       result = await api.testPrint(printer.value || null, preset.value, props.testPages);
     } else {
-      const settings: PrintSettings = { copies: copies.value };
-      if (printer.value) settings.printer = printer.value;
-      result = await api.appPrint({ pdfPath: pdfPath.value, preset: preset.value || null, settings });
+      const incoming = await api.stageIncomingFile(pdfPath.value, "file_picker", fileCopies.value);
+      emit("incoming", incoming.id);
+      return;
     }
     latest.value = { result, status: null, statusError: "", source: submittedSource };
     follow(result.job_id);
@@ -270,7 +232,6 @@ async function submit() {
 
 onBeforeUnmount(() => {
   clearInterval(statusTimer);
-  clearTimeout(previewTimer);
 });
 </script>
 
@@ -279,7 +240,7 @@ onBeforeUnmount(() => {
     <div class="print-heading">
       <div>
         <h2 class="section-title">Print</h2>
-        <p class="hint">Pilih Preset untuk sample/kalibrasi atau File PDF untuk dokumen.</p>
+        <p class="hint">Cetak sample desain atau kirim dokumen ke pemeriksaan tujuan.</p>
       </div>
       <button class="ghost small" type="button" @click="emit('back')">
         <ArrowLeft :size="14" /> Kembali ke {{ returnLabel }}
@@ -294,12 +255,12 @@ onBeforeUnmount(() => {
       >
       <label
         ><input v-model="source" name="print-source" type="radio" value="pdf" :disabled="busy" />
-        <FileText :size="15" /> File PDF</label
+        <FileText :size="15" /> PDF / gambar</label
       >
     </fieldset>
 
     <div class="grid2">
-      <label class="field" for="print-printer">
+      <label v-if="source === 'preset'" class="field" for="print-printer">
         <span>Printer</span>
         <select id="print-printer" v-model="printer" :disabled="busy">
           <option value="">Otomatis · {{ effectivePrinter }}</option>
@@ -311,11 +272,10 @@ onBeforeUnmount(() => {
           </option>
         </select>
       </label>
-      <label class="field" for="print-preset">
-        <span>{{ source === "preset" ? "Preset" : "Preset opsional" }}</span>
+      <label v-if="source === 'preset'" class="field" for="print-preset">
+        <span>Preset</span>
         <select id="print-preset" v-model="preset" :disabled="busy">
-          <option v-if="source === 'preset'" value="">Pilih preset</option>
-          <option v-else value="">Tanpa preset</option>
+          <option value="">Pilih preset</option>
           <option v-if="preset && !selectedPreset" :value="preset" disabled>{{ preset }} · tidak tersedia</option>
           <option v-for="name in names" :key="name" :value="name">{{ name }}</option>
         </select>
@@ -337,16 +297,7 @@ onBeforeUnmount(() => {
     </label>
     <label v-else class="field count-field" for="print-copies">
       <span>Jumlah salinan PDF</span>
-      <input
-        id="print-copies"
-        v-model.number="copies"
-        type="number"
-        min="1"
-        max="999"
-        step="1"
-        :disabled="busy"
-        @input="copiesTouched = true"
-      />
+      <input id="print-copies" v-model.number="fileCopies" type="number" min="1" max="999" step="1" :disabled="busy" />
     </label>
 
     <EmptyState
@@ -375,26 +326,22 @@ onBeforeUnmount(() => {
     <div v-else class="source-content">
       <div class="pdf-picker">
         <div class="truncate">
-          <strong>{{ pdfName || "Belum ada file dipilih" }}</strong>
-          <p class="hint">Pilih PDF. Isi file juga diperiksa oleh layanan print sebelum diproses.</p>
+          <strong>{{ fileName || "Belum ada file dipilih" }}</strong>
+          <p class="hint">Pilih satu PDF, PNG, atau JPG. Dokumen diperiksa dan dipratinjau sebelum dikirim.</p>
         </div>
-        <button class="ghost small" type="button" :disabled="busy" @click="choosePdf">
-          <Upload :size="14" /> Pilih PDF
+        <button class="ghost small" type="button" :disabled="busy" @click="chooseFile">
+          <Upload :size="14" /> Pilih file
         </button>
       </div>
-      <div v-if="pdfPath" class="pdf-preview">
-        <p v-if="pdfPreviewLoading" class="hint">Membuat pratinjau lembar pertama…</p>
-        <p v-else-if="pdfPreviewError" class="error">Pratinjau tidak dapat dibuat: {{ pdfPreviewError }}</p>
-        <img v-else-if="pdfPreview" :src="pdfPreview" alt="Pratinjau lembar pertama, sesuai ukuran dan posisi cetak" />
-      </div>
+      <p class="hint source-note">DOCX/XLSX: cetak dari Word/Excel dengan memilih printer ix.print.</p>
     </div>
 
     <section class="summary" aria-label="Ringkasan print">
       <strong>Ringkasan</strong>
       <div>
-        <span>Sumber</span><b>{{ source === "preset" ? "Preset" : pdfName || "PDF belum dipilih" }}</b>
+        <span>Sumber</span><b>{{ source === "preset" ? "Preset" : fileName || "File belum dipilih" }}</b>
       </div>
-      <div>
+      <div v-if="source === 'preset'">
         <span>Printer</span
         ><b
           >{{ effectivePrinter
@@ -403,16 +350,16 @@ onBeforeUnmount(() => {
           ></b
         >
       </div>
-      <div>
+      <div v-if="source === 'preset'">
         <span>Preset</span><b>{{ source === "preset" ? preset || "Belum dipilih" : preset || "Tanpa preset" }}</b>
       </div>
       <div v-if="source === 'preset'">
         <span>Halaman sample / kalibrasi</span><b>{{ testPages }}</b>
       </div>
       <div v-else>
-        <span>Salinan PDF</span><b>{{ copies }}</b>
+        <span>Salinan</span><b>{{ fileCopies }}</b>
       </div>
-      <div>
+      <div v-if="source === 'preset'">
         <span>Pengaturan efektif</span><b>{{ currentSettings }}</b>
       </div>
     </section>
@@ -420,7 +367,7 @@ onBeforeUnmount(() => {
     <ul v-if="validationErrors.length && !showNoPresetErrors" class="validation-errors" aria-live="polite">
       <li v-for="error in validationErrors" :key="error">{{ error }}</li>
     </ul>
-    <div v-if="printerErrors.length" class="inline-action">
+    <div v-if="source === 'preset' && printerErrors.length" class="inline-action">
       <button class="ghost small" type="button" @click="emit('printers')">Buka Printers</button>
     </div>
     <p v-if="presetRemoved" class="error" role="alert">Preset “{{ preset }}” sudah dihapus atau tidak lagi tersedia.</p>
@@ -428,12 +375,12 @@ onBeforeUnmount(() => {
 
     <div class="print-actions">
       <button class="primary" type="button" :disabled="busy || validationErrors.length > 0" @click="submit">
-        <Printer :size="15" /> {{ busy ? "Mengirim…" : source === "preset" ? "Print sample / kalibrasi" : "Print PDF" }}
+        <Printer :size="15" />
+        {{ busy ? "Menyiapkan…" : source === "preset" ? "Print sample / kalibrasi" : "Tinjau tujuan" }}
       </button>
     </div>
     <p v-if="source === 'pdf'" class="hint action-note">
-      Jumlah salinan PDF mengikuti angka di atas; angka itu berbeda dari jumlah halaman sample/kalibrasi pada sumber
-      Preset.
+      Ukuran, orientasi, dan skala dokumen dipertahankan. Konfirmasi tujuan dilakukan di layar berikutnya.
     </p>
 
     <article v-if="latest" class="job-result" aria-live="polite">

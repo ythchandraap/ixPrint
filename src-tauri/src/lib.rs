@@ -9,11 +9,8 @@ use infrastructure::net::{callback_client::CallbackClient, remote_client::Remote
 use infrastructure::os::SystemClock;
 use infrastructure::pdf::PdfEngineAdapter;
 use infrastructure::persistence::{
-    api_access_log::ApiAccessLog,
-    config_store::ConfigStore,
-    diagnostics_store::Diagnostics,
-    history_store::History,
-    idempotency_store::IdempotencyStore, remote_store::RemoteStore,
+    api_access_log::ApiAccessLog, config_store::ConfigStore, diagnostics_store::Diagnostics, history_store::History,
+    idempotency_store::IdempotencyStore, incoming_store::IncomingStore, remote_store::RemoteStore,
 };
 use infrastructure::printing::{admin::LocalPrinterAdmin, LocalPrinterGateway};
 use std::path::PathBuf;
@@ -73,10 +70,17 @@ pub fn run() {
 
                 let config = ConfigStore::load(&data_dir);
                 let remotes = RemoteStore::load(&data_dir);
-                let history = History::new(data_dir.join("history"));
+                let history = History::with_content_dir(data_dir.join("history"), data_dir.join("history-content"));
                 history.prune(config.get().history_retention_days);
                 let idempotency = IdempotencyStore::new(data_dir.join("idempotency"));
                 idempotency.prune();
+                let incoming_documents = IncomingStore::new(data_dir.join("incoming-documents"));
+                if let Err(error) = crate::application::document_service::prune(
+                    &incoming_documents,
+                    config.get().history_retention_days,
+                ) {
+                    let _ = diagnostics.record("error", "incoming-documents", &error, None);
+                }
 
                 let state = Arc::new(AppState {
                     config: Arc::new(config),
@@ -89,6 +93,7 @@ pub fn run() {
                     failed_auth: Default::default(),
                     history: Arc::new(history),
                     idempotency: Arc::new(idempotency),
+                    incoming_documents: Arc::new(incoming_documents),
                     diagnostics: Arc::new(diagnostics),
                     api_access_log: Arc::new(ApiAccessLog::new(&data_dir)),
                     printer_gateway: Arc::new(LocalPrinterGateway),

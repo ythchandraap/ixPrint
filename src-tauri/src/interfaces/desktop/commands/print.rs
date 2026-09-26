@@ -148,6 +148,7 @@ pub async fn test_print(
         document: Document::TestPage {
             pages: pages.unwrap_or(1),
         },
+        history_input: None,
         file_name: "ix.print test page.pdf".into(),
         settings: PrintSettings {
             printer,

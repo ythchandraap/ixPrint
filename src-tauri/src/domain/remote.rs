@@ -95,6 +95,15 @@ pub struct RemotePrintResult {
     pub sheets: u32,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct ReadyPrintResult {
+    pub job_id: String,
+    pub printer: String,
+    pub sheets: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spooler_job: Option<String>,
+}
+
 pub(crate) fn validate_all(remotes: &[Remote]) -> Result<(), String> {
     if remotes.len() > MAX_REMOTES {
         return Err(format!("At most {} other ix.print computers are allowed", MAX_REMOTES));

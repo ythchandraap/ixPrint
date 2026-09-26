@@ -32,6 +32,8 @@ pub struct JobRequest {
     /// Preassigned by the HTTP idempotency reservation; desktop jobs generate their own.
     pub job_id: Option<String>,
     pub document: Document,
+    /// Parsed JSON body, kept separately from normalized print records for History.
+    pub history_input: Option<serde_json::Value>,
     pub file_name: String,
     pub settings: PrintSettings,
     pub preset: Option<String>,

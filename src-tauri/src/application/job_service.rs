@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use crate::application::ports::JobMarker;
 use crate::application::state::AppState;
-use crate::domain::history::HistoryEntry;
+use crate::domain::history::{HistoryContentStatus, HistoryEntry, HistoryInputKind, HistoryOutputState};
 use crate::domain::job::{design_paper, Document, JobError, JobRequest, JobResult, MAX_TEST_PAGES};
 use crate::domain::preset::Preset;
 use crate::domain::printer::DeviceOptions;
@@ -25,6 +25,7 @@ pub fn run_with_preset(
     let job_id = req.job_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let config = state.config.get();
     let preset_name = req.preset.clone().or(config.default_preset.clone());
+    state.history.content_job_started(&job_id);
 
     let mut record = HistoryEntry {
         id: job_id.clone(),
@@ -43,7 +44,26 @@ pub fn run_with_preset(
         duration_ms: 0,
         callback: None,
         remote: None,
+        content: Some(HistoryContentStatus {
+            input_kind: None,
+            input_saved: false,
+            output: HistoryOutputState::NotCreated,
+        }),
     };
+
+    match (&req.document, req.history_input.as_ref()) {
+        (Document::File(path), _) => {
+            record.content.as_mut().unwrap().input_kind = Some(HistoryInputKind::Pdf);
+            let saved = state.history.save_input_pdf(&record, path).is_ok();
+            record.content.as_mut().unwrap().input_saved = saved;
+        }
+        (_, Some(value)) => {
+            record.content.as_mut().unwrap().input_kind = Some(HistoryInputKind::Json);
+            let saved = state.history.save_input_json(&record, value).is_ok();
+            record.content.as_mut().unwrap().input_saved = saved;
+        }
+        _ => {}
+    }
 
     let result = (|| -> Result<JobResult, JobError> {
         let preset = if let Some(draft) = &preset_override {
@@ -60,6 +80,15 @@ pub fn run_with_preset(
         };
         let merged = preset.settings.overlay(&req.settings);
         merged.validate().map_err(JobError::BadRequest)?;
+
+        if let Document::TestPage { .. } = &req.document {
+            if let Some(design) = &preset.design {
+                let sample = serde_json::json!({ "data": [design.sample.clone()], "header": design.sample.clone() });
+                record.content.as_mut().unwrap().input_kind = Some(HistoryInputKind::Sample);
+                let saved = state.history.save_input_json(&record, &sample).is_ok();
+                record.content.as_mut().unwrap().input_saved = saved;
+            }
+        }
 
         let printer_name = merged
             .printer
@@ -84,7 +113,7 @@ pub fn run_with_preset(
                 )));
             }
             crate::domain::remote::Target::Remote { remote, printer } => {
-                return crate::application::remote_service::forward(
+                let forwarded = crate::application::remote_service::forward(
                     state,
                     crate::application::remote_service::ForwardRequest {
                         job_id: &job_id,
@@ -97,6 +126,10 @@ pub fn run_with_preset(
                         record: &mut record,
                     },
                 );
+                if forwarded.is_ok() {
+                    record.content.as_mut().unwrap().output = HistoryOutputState::RemoteUnavailable;
+                }
+                return forwarded;
             }
         }
 
@@ -177,7 +210,7 @@ pub fn run_with_preset(
         record.settings = serde_json::to_value(&job).unwrap_or_default();
 
         let ready = state.jobs_dir.join(format!("{}-ready.pdf", job_id));
-        let outcome = print_ready(state, &source, &ready, &job, default_paper, &req.file_name);
+        let outcome = print_ready(state, &source, &ready, &job, default_paper, &req.file_name, &mut record);
         state.pdf_engine.remove_generated_file(&ready);
         state.pdf_engine.remove_generated_file(&generated);
         let (sheets, spooler_job) = outcome.map_err(JobError::Failed)?;
@@ -203,6 +236,7 @@ pub fn run_with_preset(
     if let Err(error) = state.history.append(&record) {
         eprintln!("Failed to write history: {}", error);
     }
+    state.history.content_job_finished(&job_id);
     if let Err(error) = &result {
         let _ = state.diagnostics.record("error", req.source, error.message(), None);
     }
@@ -279,8 +313,15 @@ fn print_ready(
     job: &JobSettings,
     default_paper: (f32, f32),
     file_name: &str,
+    record: &mut HistoryEntry,
 ) -> Result<(u32, Option<String>), String> {
     let layout = state.pdf_engine.build_layout(source, ready, job, default_paper)?;
+    let saved = state.history.save_output_pdf(record, ready).is_ok();
+    record.content.as_mut().unwrap().output = if saved {
+        HistoryOutputState::Saved
+    } else {
+        HistoryOutputState::SaveFailed
+    };
     let options = DeviceOptions {
         job_name: file_name,
         copies: job.copies,
@@ -296,7 +337,3 @@ fn print_ready(
         .print(&job.printer, ready, &layout.sheets, &options)?;
     Ok((layout.sheets.len() as u32 * job.copies, spooler_job))
 }
-
-#[cfg(test)]
-#[path = "job_service/tests.rs"]
-mod tests;

@@ -1,6 +1,9 @@
 use super::*;
+use crate::application::ports::HistoryRepository;
 use crate::application::state::test_support::state;
+use crate::infrastructure::persistence::history_store::History;
 use actix_web::test;
+use std::sync::Arc;
 
 #[actix_web::test]
 async fn contract_all_routes_registered() {
@@ -440,7 +443,14 @@ async fn desktop_key_only_authorizes_loopback_requests() {
 
 #[actix_web::test]
 async fn json_print_reports_unknown_printer_before_spooling() {
-    let state = state();
+    let root = std::env::temp_dir().join(format!("ixprint-http-history-content-{}", uuid::Uuid::new_v4()));
+    let mut app_state = Arc::try_unwrap(state()).ok().unwrap();
+    let history = Arc::new(History::with_content_dir(
+        root.join("history"),
+        root.join("history-content"),
+    ));
+    app_state.history = history.clone();
+    let state = Arc::new(app_state);
     let design: crate::domain::template::Template = serde_json::from_value(serde_json::json!({
         "width_mm": 60,
         "height_mm": 40,
@@ -464,8 +474,9 @@ async fn json_print_reports_unknown_printer_before_spooling() {
     let missing_printer = format!("__ixprint_missing_{}__", uuid::Uuid::new_v4());
     let payload = serde_json::json!({
         "preset": "label",
-        "data": { "name": "Example" },
-        "settings": { "printer": missing_printer }
+        "data": { "name": "SECRET_INPUT_VALUE" },
+        "header": { "batch": "B-7" },
+        "settings": { "printer": missing_printer, "copies": 1 }
     });
     let response = test::call_service(
         &app,
@@ -479,6 +490,17 @@ async fn json_print_reports_unknown_printer_before_spooling() {
     assert_eq!(response.status().as_u16(), 400);
     let body: serde_json::Value = test::read_body_json(response).await;
     assert!(body["message"].as_str().unwrap().contains("was not found"));
+
+    let day = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let entry = history.read_page(&day, 1, 20, false).unwrap().entries.remove(0);
+    assert_eq!(
+        entry.content.as_ref().unwrap().input_kind,
+        Some(crate::domain::history::HistoryInputKind::Json)
+    );
+    assert_eq!(history.read_input_json(&entry).unwrap(), Some(payload));
+    let jsonl = std::fs::read_to_string(root.join("history").join(format!("{day}.jsonl"))).unwrap();
+    assert!(!jsonl.contains("SECRET_INPUT_VALUE"));
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[actix_web::test]

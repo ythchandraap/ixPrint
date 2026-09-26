@@ -114,6 +114,7 @@ pub async fn test_preset_draft(state: AppStateRef<'_>, name: String) -> Result<c
         let request = crate::domain::job::JobRequest {
             job_id: None,
             document: crate::domain::job::Document::TestPage { pages: 1 },
+            history_input: None,
             file_name: format!("Draft test: {}", name),
             settings: Default::default(),
             preset: Some(name),

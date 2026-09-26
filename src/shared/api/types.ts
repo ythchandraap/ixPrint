@@ -256,6 +256,47 @@ export interface JobStatus {
   remote_unreachable?: boolean;
 }
 
+export type IncomingSource = "system_print" | "file_picker" | "finder" | "explorer";
+export type IncomingState = "awaiting_destination" | "submitting" | "queued" | "failed" | "cancelled";
+
+export interface PageMedia {
+  width_pt: number;
+  height_pt: number;
+}
+
+export interface IncomingJob {
+  id: string;
+  source: IncomingSource;
+  document_name: string;
+  pages: PageMedia[];
+  copies: number;
+  os_job_id?: string;
+  state: IncomingState;
+  received_at: string;
+  printer?: string;
+  spooler_job?: string;
+  remote_job_id?: string;
+  remote_name?: string;
+  submission_started_at?: string;
+  message?: string;
+}
+
+export interface IncomingTargetCheck {
+  compatible: boolean;
+  message?: string;
+  supported_media: string[];
+  remote?: string;
+}
+
+export interface IncomingPrintResult {
+  job_id: string;
+  printer: string;
+  sheets: number;
+  copies: number;
+  spooler_job?: string;
+  remote?: string;
+}
+
 export interface ImportItem {
   name: string;
   settings: Preset;
@@ -312,6 +353,38 @@ export interface HistoryEntry {
   /** Delivery of the result callback, when the client asked for one. */
   callback?: CallbackStatus;
   remote?: { remote_id: string; remote_name: string; job_id: string };
+  content?: HistoryContentStatus;
+}
+
+export type HistoryInputKind = "json" | "pdf" | "sample";
+export type HistoryOutputState = "not_created" | "saved" | "save_failed" | "remote_unavailable";
+export type ContentAvailability =
+  | "not_saved"
+  | "no_request_body"
+  | "not_pdf"
+  | "save_failed"
+  | "not_created"
+  | "remote_unavailable"
+  | "unavailable"
+  | "available";
+
+export interface HistoryContentStatus {
+  input_kind: HistoryInputKind | null;
+  input_saved: boolean;
+  output: HistoryOutputState;
+}
+
+export interface HistoryContentDetail {
+  content: HistoryContentStatus | null;
+  input_availability: ContentAvailability;
+  input_json: unknown | null;
+}
+
+export interface HistoryPdfPage {
+  availability: ContentAvailability;
+  page: number;
+  page_count: number | null;
+  image_data_url: string | null;
 }
 
 export interface CallbackStatus {
