@@ -66,21 +66,26 @@ pub enum Target {
 pub enum RemoteError {
     BadRequest(String),
     Failed(String),
+    OutcomeUnknown(String),
 }
 
 impl std::fmt::Display for RemoteError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::BadRequest(message) | Self::Failed(message) => message,
+            Self::BadRequest(message) | Self::Failed(message) | Self::OutcomeUnknown(message) => message,
         })
     }
 }
 
 impl RemoteError {
-    pub fn into_job_error(self) -> JobError {
+    pub fn into_job_error(self, job_id: &str) -> JobError {
         match self {
             Self::BadRequest(message) => JobError::BadRequest(message),
             Self::Failed(message) => JobError::Failed(message),
+            Self::OutcomeUnknown(message) => JobError::OutcomeUnknown {
+                job_id: job_id.to_string(),
+                message: format!("{} Cause: {}", crate::domain::job::UNKNOWN_OUTCOME_MESSAGE, message),
+            },
         }
     }
 

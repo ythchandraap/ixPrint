@@ -5,6 +5,8 @@ use crate::domain::settings::{Align, Margins, Orientation, Paper, PrintSettings,
 use crate::domain::template::Record;
 
 pub const MAX_TEST_PAGES: u32 = 50;
+pub const UNKNOWN_OUTCOME_MESSAGE: &str =
+    "The print outcome is not known. Check History and the printer queue before creating a new job.";
 
 #[derive(Debug)]
 pub enum JobError {
@@ -12,12 +14,15 @@ pub enum JobError {
     BadRequest(String),
     /// The document or printer failed: HTTP 500.
     Failed(String),
+    /// Submission began but its result cannot be determined safely.
+    OutcomeUnknown { job_id: String, message: String },
 }
 
 impl JobError {
     pub fn message(&self) -> &str {
         match self {
             JobError::BadRequest(m) | JobError::Failed(m) => m,
+            JobError::OutcomeUnknown { message, .. } => message,
         }
     }
 }

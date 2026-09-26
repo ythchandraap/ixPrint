@@ -1,5 +1,6 @@
 //! Windows GDI printing adapter.
 
+use super::super::check_end_doc;
 use super::capabilities::{papers, trays, PaperEntry};
 use super::shared::{on_spooler_thread, DevMode, PrinterHandle};
 use crate::domain::layout::Sheet;
@@ -217,10 +218,10 @@ fn print_impl(printer: &str, pdf: &Path, sheets: &[Sheet], o: &DeviceOptions) ->
         Ok(())
     })();
 
-    unsafe {
-        if result.is_ok() {
-            EndDoc(dc.0);
-        } else {
+    if result.is_ok() {
+        check_end_doc(unsafe { EndDoc(dc.0) })?;
+    } else {
+        unsafe {
             AbortDoc(dc.0);
         }
     }

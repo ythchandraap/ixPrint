@@ -341,6 +341,7 @@ mod tests {
             settings: serde_json::json!({}),
             success: true,
             error: None,
+            error_code: None,
             duration_ms: 1,
             callback: None,
             remote: None,

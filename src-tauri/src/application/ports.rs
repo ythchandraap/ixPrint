@@ -26,15 +26,32 @@ pub trait ConfigRepository: Send + Sync {
 }
 
 pub enum Reservation {
-    New,
-    Existing(String),
-    Pending,
+    New(String),
+    Resume(String),
+    Existing(String, OperationState),
+    Pending(Option<String>),
     Conflict,
+    Unknown(Option<String>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationState {
+    Reserved,
+    Submitting,
+    Finished,
+    Unknown,
 }
 
 pub trait IdempotencyRepository: Send + Sync {
     /// Atomically reserve a key before the spooler is contacted.
     fn reserve(&self, key_hash: &str, fingerprint: &str, job_id: &str) -> Result<Reservation, String>;
+    fn operation_state(&self, job_id: &str) -> Result<Option<OperationState>, String>;
+    fn mark_submitting(&self, job_id: &str) -> Result<(), String>;
+    fn mark_finished(&self, job_id: &str) -> Result<(), String>;
+    fn mark_unknown(&self, job_id: &str) -> Result<(), String>;
+    fn release_reserved(&self, job_id: &str);
+    fn recover(&self, history: &dyn HistoryRepository) -> Result<(), String>;
 }
 
 pub trait RemoteRepository: Send + Sync {
@@ -49,7 +66,7 @@ pub trait HistoryRepository: Send + Sync {
     fn read_page(&self, date: &str, page: usize, per_page: usize, failed_only: bool) -> Result<HistoryPage, String>;
     fn search(&self, query: &str, page: usize, per_page: usize) -> Result<HistoryPage, String>;
     fn days(&self) -> Vec<HistoryDay>;
-    fn prune(&self, retention_days: u32);
+    fn prune(&self, retention_days: u32) -> Result<(), String>;
     fn content_job_started(&self, _job_id: &str) {}
     fn content_job_finished(&self, _job_id: &str) {}
     fn save_input_json(&self, _entry: &HistoryEntry, _value: &Value) -> Result<(), String> {
@@ -179,17 +196,9 @@ pub trait RemoteGateway: Send + Sync {
         path: &Path,
         file_name: &str,
         settings: &PrintSettings,
+        logical_job_id: &str,
     ) -> Result<RemotePrintResult, RemoteError>;
-    fn print_ready_pdf(
-        &self,
-        _remote: &Remote,
-        _path: &Path,
-        _file_name: &str,
-        _source: IncomingSource,
-        _source_job_id: &str,
-        _copies: u32,
-        _printer: &str,
-    ) -> Result<ReadyPrintResult, RemoteError> {
+    fn print_ready_pdf(&self, _request: ReadyPrintRequest<'_>) -> Result<ReadyPrintResult, RemoteError> {
         Err(RemoteError::Failed(
             "Ready-PDF forwarding is unavailable on this remote adapter".into(),
         ))
@@ -199,7 +208,18 @@ pub trait RemoteGateway: Send + Sync {
         remote: &Remote,
         pages: u32,
         settings: &PrintSettings,
+        logical_job_id: &str,
     ) -> Result<RemotePrintResult, RemoteError>;
+}
+
+pub struct ReadyPrintRequest<'a> {
+    pub remote: &'a Remote,
+    pub path: &'a Path,
+    pub file_name: &'a str,
+    pub source: IncomingSource,
+    pub source_job_id: &'a str,
+    pub copies: u32,
+    pub printer: &'a str,
 }
 
 pub trait CallbackSender: Send + Sync {

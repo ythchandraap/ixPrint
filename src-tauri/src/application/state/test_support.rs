@@ -202,6 +202,7 @@ impl RemoteGateway for OfflineRemote {
         _path: &Path,
         _file_name: &str,
         _settings: &PrintSettings,
+        _logical_job_id: &str,
     ) -> Result<RemotePrintResult, RemoteError> {
         Err(RemoteError::Failed("Offline in test state".into()))
     }
@@ -210,6 +211,7 @@ impl RemoteGateway for OfflineRemote {
         _remote: &Remote,
         _pages: u32,
         _settings: &PrintSettings,
+        _logical_job_id: &str,
     ) -> Result<RemotePrintResult, RemoteError> {
         Err(RemoteError::Failed("Offline in test state".into()))
     }

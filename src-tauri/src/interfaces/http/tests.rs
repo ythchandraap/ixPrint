@@ -1,9 +1,145 @@
 use super::*;
-use crate::application::ports::HistoryRepository;
+use crate::application::ports::{HistoryRepository, PdfEngine, PrinterGateway, RemoteGateway};
 use crate::application::state::test_support::state;
+use crate::domain::layout::{LayoutResult, Sheet};
+use crate::domain::printer::{Capabilities, DeviceOptions, JobState, JobStatus, Printer, PrinterQueue};
+use crate::domain::remote::{Remote, RemoteError, RemotePrintResult, SharedPresetListing};
+use crate::domain::settings::{JobSettings, PrintSettings};
+use crate::domain::template::{Record, Template};
 use crate::infrastructure::persistence::history_store::History;
 use actix_web::test;
+use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+
+struct CountingPrinter(Arc<AtomicUsize>);
+
+impl PrinterGateway for CountingPrinter {
+    fn list_printers(&self) -> Vec<Printer> {
+        vec![Printer {
+            name: "Office".into(),
+            status: "Ready".into(),
+            message: None,
+            shared: String::new(),
+            os_default: false,
+        }]
+    }
+    fn os_default_printer(&self) -> Option<String> {
+        None
+    }
+    fn capabilities(&self, _: &str) -> Result<Capabilities, String> {
+        Ok(Capabilities::default())
+    }
+    fn default_paper_mm(&self, _: &str) -> (f32, f32) {
+        (210.0, 297.0)
+    }
+    fn print(&self, _: &str, _: &Path, _: &[Sheet], _: &DeviceOptions) -> Result<Option<String>, String> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(Some("spooler-job-1".into()))
+    }
+    fn queue(&self, _: &str) -> Result<PrinterQueue, String> {
+        unreachable!()
+    }
+    fn job_status(&self, _: &str, _: &str) -> Result<JobStatus, String> {
+        Ok(JobStatus {
+            state: JobState::Queued,
+            position: Some(1),
+            ahead: Some(0),
+            message: None,
+            printer_status: "Ready".into(),
+            printer_message: None,
+        })
+    }
+}
+
+struct TestPdf;
+
+impl PdfEngine for TestPdf {
+    fn engine_status(&self) -> Result<(), String> {
+        Ok(())
+    }
+    fn build_layout(&self, _: &Path, output: &Path, _: &JobSettings, _: (f32, f32)) -> Result<LayoutResult, String> {
+        write_test_pdf(output)?;
+        Ok(LayoutResult {
+            sheets: vec![Sheet {
+                width_pt: 72.0,
+                height_pt: 72.0,
+            }],
+        })
+    }
+    fn render_template(&self, path: &Path, _: &Template, _: &[Record], _: &Record) -> Result<(), String> {
+        write_test_pdf(path)
+    }
+    fn pages_png(
+        &self,
+        _: &Template,
+        _: &[Record],
+        _: &Record,
+        _: usize,
+        _: f32,
+    ) -> Result<(Vec<Vec<u8>>, usize), String> {
+        unreachable!()
+    }
+    fn preview_png(&self, _: &Template, _: &Record, _: f32) -> Result<Vec<u8>, String> {
+        unreachable!()
+    }
+    fn render_page_png(&self, _: &Path, _: usize, _: f32) -> Result<Vec<u8>, String> {
+        unreachable!()
+    }
+    fn page_count(&self, _: &Path) -> Result<usize, String> {
+        Ok(1)
+    }
+    fn test_page(&self, path: &Path, _: f32, _: f32, _: &[String], _: u32) -> Result<(), String> {
+        write_test_pdf(path)
+    }
+    fn remove_generated_file(&self, path: &Path) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+fn write_test_pdf(path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    std::fs::write(path, b"%PDF-test-double").map_err(|error| error.to_string())
+}
+
+struct UnknownRemote(Arc<AtomicUsize>);
+
+impl RemoteGateway for UnknownRemote {
+    fn shared_presets(&self, _: &Remote) -> Result<SharedPresetListing, RemoteError> {
+        unreachable!()
+    }
+    fn fetch_shared_preset(&self, _: &Remote, _: &str) -> Result<Vec<u8>, RemoteError> {
+        unreachable!()
+    }
+    fn fetch_printers(&self, _: &Remote) -> Result<Vec<Printer>, RemoteError> {
+        unreachable!()
+    }
+    fn capabilities(&self, _: &Remote, _: &str) -> Result<Capabilities, RemoteError> {
+        unreachable!()
+    }
+    fn queue(&self, _: &Remote, _: &str) -> Result<PrinterQueue, RemoteError> {
+        unreachable!()
+    }
+    fn job_status(&self, _: &Remote, _: &str) -> Result<serde_json::Value, RemoteError> {
+        unreachable!()
+    }
+    fn print_pdf(
+        &self,
+        _: &Remote,
+        _: &Path,
+        _: &str,
+        _: &PrintSettings,
+        _: &str,
+    ) -> Result<RemotePrintResult, RemoteError> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Err(RemoteError::OutcomeUnknown("remote response was lost".into()))
+    }
+    fn test_page(&self, _: &Remote, _: u32, _: &PrintSettings, _: &str) -> Result<RemotePrintResult, RemoteError> {
+        unreachable!()
+    }
+}
 
 #[actix_web::test]
 async fn contract_all_routes_registered() {
@@ -269,7 +405,135 @@ async fn idempotency_key_replays_failure_and_rejects_changed_content() {
         .contains("Original request failed"));
     let changed = test::call_service(&app, send(r#"{"preset":"missing","data":{"sku":"B"}}"#)).await;
     assert_eq!(changed.status().as_u16(), 409);
+    let changed_settings = test::call_service(
+        &app,
+        send(r#"{"preset":"missing","data":{"sku":"A"},"settings":{"copies":2}}"#),
+    )
+    .await;
+    assert_eq!(changed_settings.status().as_u16(), 409);
     assert_eq!(state.history.days()[0].total, 1);
+}
+
+#[actix_web::test]
+async fn idempotent_success_replays_without_a_second_printer_submission() {
+    let state = state();
+    let printer_calls = Arc::new(AtomicUsize::new(0));
+    let mut owned_state = Arc::try_unwrap(state).ok().unwrap();
+    owned_state.printer_gateway = Arc::new(CountingPrinter(printer_calls.clone()));
+    owned_state.pdf_engine = Arc::new(TestPdf);
+    let state = Arc::new(owned_state);
+    let design: Template = serde_json::from_value(serde_json::json!({
+        "width_mm": 60,
+        "height_mm": 40,
+        "sample": {"sku": "sample"},
+        "elements": []
+    }))
+    .unwrap();
+    state
+        .config
+        .update(&mut |config| {
+            config.presets.insert(
+                "label".into(),
+                crate::domain::preset::Preset {
+                    settings: PrintSettings::default(),
+                    design: Some(design.clone()),
+                },
+            );
+            Ok(())
+        })
+        .unwrap();
+    let app = test::init_service(App::new().app_data(web::Data::new(state.clone())).configure(routes)).await;
+    let send = || {
+        test::TestRequest::post()
+            .uri("/print")
+            .insert_header(("Content-Type", "application/json"))
+            .insert_header(("Idempotency-Key", "logical-label-123"))
+            .set_payload(r#"{"preset":"label","data":{"sku":"A"},"settings":{"printer":"Office"}}"#)
+            .to_request()
+    };
+    let first = test::call_service(&app, send()).await;
+    assert_eq!(first.status().as_u16(), 200);
+    let first: serde_json::Value = test::read_body_json(first).await;
+    assert_eq!(first["replayed"], false);
+
+    let replay = test::call_service(&app, send()).await;
+    assert_eq!(replay.status().as_u16(), 200);
+    let replay: serde_json::Value = test::read_body_json(replay).await;
+    assert_eq!(replay["job_id"], first["job_id"]);
+    assert_eq!(replay["replayed"], true);
+    assert_eq!(printer_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(state.history.days()[0].total, 1);
+}
+
+#[actix_web::test]
+async fn ambiguous_remote_submission_returns_recoverable_409_and_never_resubmits() {
+    let state = state();
+    let remote_calls = Arc::new(AtomicUsize::new(0));
+    let mut owned_state = Arc::try_unwrap(state).ok().unwrap();
+    owned_state.remote_gateway = Arc::new(UnknownRemote(remote_calls.clone()));
+    owned_state.pdf_engine = Arc::new(TestPdf);
+    let state = Arc::new(owned_state);
+    let design: Template = serde_json::from_value(serde_json::json!({
+        "width_mm": 60,
+        "height_mm": 40,
+        "sample": {"sku": "sample"},
+        "elements": []
+    }))
+    .unwrap();
+    state
+        .config
+        .update(&mut |config| {
+            config.presets.insert(
+                "label".into(),
+                crate::domain::preset::Preset {
+                    settings: PrintSettings::default(),
+                    design: Some(design.clone()),
+                },
+            );
+            Ok(())
+        })
+        .unwrap();
+    state
+        .remotes
+        .update(&mut |remotes| {
+            remotes.push(Remote {
+                id: "remote-id".into(),
+                name: "Office".into(),
+                url: "http://office.local:18032".into(),
+                token: "fxp_remote-test-token".into(),
+                preset: None,
+                created_at: String::new(),
+            });
+            Ok(())
+        })
+        .unwrap();
+
+    let app = test::init_service(App::new().app_data(web::Data::new(state.clone())).configure(routes)).await;
+    let peer: std::net::SocketAddr = "127.0.0.1:4000".parse().unwrap();
+    let send = || {
+        test::TestRequest::post()
+            .uri("/print")
+            .peer_addr(peer)
+            .insert_header(("Content-Type", "application/json"))
+            .insert_header(("Idempotency-Key", "remote-label-logical-job"))
+            .set_payload(r#"{"preset":"label","data":{"sku":"A"},"settings":{"printer":"Office / Label"}}"#)
+            .to_request()
+    };
+    let first = test::call_service(&app, send()).await;
+    assert_eq!(first.status().as_u16(), 409);
+    let first: serde_json::Value = test::read_body_json(first).await;
+    assert_eq!(first["code"], "outcome_unknown");
+    assert!(first["message"].as_str().unwrap().contains("Check History"));
+    let job_id = first["job_id"].as_str().unwrap();
+    let entry = state.history.find(job_id).unwrap();
+    assert_eq!(entry.error_code.as_deref(), Some("outcome_unknown"));
+
+    let retry = test::call_service(&app, send()).await;
+    assert_eq!(retry.status().as_u16(), 409);
+    let retry: serde_json::Value = test::read_body_json(retry).await;
+    assert_eq!(retry["code"], "outcome_unknown");
+    assert_eq!(retry["job_id"], job_id);
+    assert_eq!(remote_calls.load(Ordering::SeqCst), 1);
 }
 
 #[actix_web::test]

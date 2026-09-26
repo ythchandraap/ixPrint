@@ -4,16 +4,48 @@ use super::job_support::{
     callback_from_query, fingerprint, idempotency_key, read_json_payload, read_json_payload_with_value, save_upload,
     Submission,
 };
-use crate::application::ports::Reservation;
+use crate::application::ports::{OperationState, Reservation};
 use crate::application::state::AppState;
 use crate::domain::auth;
 use crate::domain::callback::Callback;
-use crate::domain::job::{Document, JobError, JobRequest};
+use crate::domain::job::{Document, JobError, JobRequest, UNKNOWN_OUTCOME_MESSAGE};
 use crate::domain::settings::PrintSettings;
 use actix_multipart::Multipart;
 use actix_web::{web, HttpRequest, HttpResponse};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+fn history_replay(state: &AppState, id: &str) -> Option<Result<Submission, JobError>> {
+    state.history.find(id).map(|entry| {
+        if entry.success {
+            let result = crate::domain::job::JobResult {
+                job_id: entry.id,
+                printer: entry.printer,
+                preset: entry.preset,
+                sheets: entry.sheets,
+                spooler_job: entry.spooler_job,
+            };
+            let status = crate::application::printer_service::job_status_json(state, &result.job_id);
+            Ok(Submission::Replay(result, status))
+        } else {
+            Err(JobError::BadRequest(format!(
+                "Original request failed: {}. Use a new Idempotency-Key to retry",
+                entry.error.unwrap_or_default()
+            )))
+        }
+    })
+}
+
+fn unknown_outcome_response(job_id: Option<&str>, message: &str) -> HttpResponse {
+    let mut body = serde_json::json!({
+        "code": "outcome_unknown",
+        "message": message,
+    });
+    if let Some(job_id) = job_id {
+        body["job_id"] = serde_json::json!(job_id);
+    }
+    HttpResponse::Conflict().json(body)
+}
 
 /// Validates a designed preset request without rendering or printing it.
 pub(crate) async fn preflight(req: HttpRequest, state: State, mut payload: web::Payload) -> HttpResponse {
@@ -48,7 +80,7 @@ pub(crate) async fn preflight(req: HttpRequest, state: State, mut payload: web::
 }
 
 /// Runs a job on the blocking pool and answers like `/print`.
-async fn submit(
+pub(super) async fn submit(
     state: Arc<AppState>,
     mut request: JobRequest,
     message: &str,
@@ -71,28 +103,45 @@ async fn submit(
                 .reserve(&key, &fingerprint, &job_id)
                 .map_err(JobError::Failed)?
             {
-                Reservation::New => request.job_id = Some(job_id),
-                Reservation::Existing(id) => {
-                    return match state.history.find(&id) {
-                        Some(entry) if entry.success => {
-                            let result = crate::domain::job::JobResult {
-                                job_id: entry.id,
-                                printer: entry.printer,
-                                preset: entry.preset,
-                                sheets: entry.sheets,
-                                spooler_job: entry.spooler_job,
-                            };
-                            let status = crate::application::printer_service::job_status_json(&state, &result.job_id);
-                            Ok(Submission::Replay(result, status))
+                Reservation::New(id) | Reservation::Resume(id) => request.job_id = Some(id),
+                Reservation::Existing(id, state_kind) => {
+                    if state_kind == OperationState::Unknown {
+                        if state
+                            .history
+                            .find(&id)
+                            .is_some_and(|entry| entry.error_code.as_deref() != Some("outcome_unknown"))
+                        {
+                            if let Some(result) = history_replay(&state, &id) {
+                                return result;
+                            }
                         }
-                        Some(entry) => Err(JobError::BadRequest(format!(
-                            "Original request failed: {}. Use a new Idempotency-Key to retry",
-                            entry.error.unwrap_or_default()
-                        ))),
-                        None => Ok(Submission::Pending(Some(id))),
+                        return Ok(Submission::Unknown(Some(id)));
+                    }
+                    if let Some(result) = history_replay(&state, &id) {
+                        if state_kind == OperationState::Submitting {
+                            let _ = state.idempotency.mark_finished(&id);
+                        }
+                        return result;
+                    }
+                    return match state_kind {
+                        OperationState::Finished | OperationState::Submitting => {
+                            let _ = state.idempotency.mark_unknown(&id);
+                            Ok(Submission::Unknown(Some(id)))
+                        }
+                        OperationState::Reserved => Ok(Submission::Pending(Some(id))),
+                        OperationState::Unknown => Ok(Submission::Unknown(Some(id))),
                     };
                 }
-                Reservation::Pending => return Ok(Submission::Pending(None)),
+                Reservation::Pending(id) => {
+                    if let Some(id) = &id {
+                        if let Some(result) = history_replay(&state, id) {
+                            let _ = state.idempotency.mark_finished(id);
+                            return result;
+                        }
+                    }
+                    return Ok(Submission::Pending(id));
+                }
+                Reservation::Unknown(id) => return Ok(Submission::Unknown(id)),
                 Reservation::Conflict => return Ok(Submission::Conflict),
             }
         }
@@ -113,7 +162,7 @@ async fn submit(
             let replayed = matches!(submission, Submission::Replay(_, _));
             let (r, status) = match submission {
                 Submission::New(r, status) | Submission::Replay(r, status) => (r, status),
-                Submission::Pending(_) | Submission::Conflict => unreachable!(),
+                Submission::Pending(_) | Submission::Unknown(_) | Submission::Conflict => unreachable!(),
             };
             let mut body = serde_json::json!({
                 "message": message,
@@ -137,10 +186,11 @@ async fn submit(
             HttpResponse::Ok().json(body)
         }
         Ok(Ok(Submission::Pending(job_id))) => HttpResponse::Accepted().json(serde_json::json!({
-            "message": "Original request is still processing or its outcome is not yet known",
+            "message": "Original request is still processing",
             "job_id": job_id,
             "replayed": true,
         })),
+        Ok(Ok(Submission::Unknown(job_id))) => unknown_outcome_response(job_id.as_deref(), UNKNOWN_OUTCOME_MESSAGE),
         Ok(Ok(Submission::Conflict)) => error(
             actix_web::http::StatusCode::CONFLICT,
             "Idempotency-Key was already used with different request content",
@@ -150,6 +200,7 @@ async fn submit(
             actix_web::http::StatusCode::INTERNAL_SERVER_ERROR,
             &format!("Print failed: {}", m),
         ),
+        Ok(Err(JobError::OutcomeUnknown { job_id, message })) => unknown_outcome_response(Some(&job_id), &message),
         Err(e) => internal(e),
     }
 }
@@ -219,7 +270,7 @@ async fn submit_data(
     submit(
         state.get_ref().clone(),
         request,
-        "Data sent to printer",
+        "Print job accepted by printer service",
         None,
         callback,
         idempotency,
@@ -351,68 +402,8 @@ pub(crate) async fn print(
     submit(
         state.get_ref().clone(),
         request,
-        "File uploaded and sent to printer",
+        "Print job accepted by printer service",
         Some(file),
-        callback,
-        idempotency,
-    )
-    .await
-}
-
-/// Prints the calibration page (`count` pages, default 1) with the same
-/// settings `/print` would use.
-pub(crate) async fn test_page(
-    req: HttpRequest,
-    state: State,
-    query: web::Query<HashMap<String, String>>,
-) -> HttpResponse {
-    let token = authorized!(req, state);
-    let _in_flight = match acquire_in_flight(state.get_ref().as_ref(), &req, token.as_ref()) {
-        Ok(guard) => guard,
-        Err(response) => return response,
-    };
-    let (settings, preset) = match PrintSettings::from_query(&query) {
-        Ok(v) => v,
-        Err(e) => return error(actix_web::http::StatusCode::BAD_REQUEST, &e),
-    };
-    let count = match query.get("count").map(|c| c.trim()).filter(|c| !c.is_empty()) {
-        None => 1,
-        Some(c) => match c.parse::<u32>() {
-            Ok(n) if (1..=crate::infrastructure::pdf::test_page::MAX_TEST_PAGES).contains(&n) => n,
-            _ => {
-                let msg = format!(
-                    "count must be between 1 and {}",
-                    crate::infrastructure::pdf::test_page::MAX_TEST_PAGES
-                );
-                return error(actix_web::http::StatusCode::BAD_REQUEST, &msg);
-            }
-        },
-    };
-    let callback = match callback_from_query(&query, token.as_ref()) {
-        Ok(c) => c,
-        Err(resp) => return resp,
-    };
-    let request = JobRequest {
-        job_id: None,
-        document: Document::TestPage { pages: count },
-        history_input: None,
-        file_name: "ix.print test page.pdf".into(),
-        settings,
-        preset,
-        source: "http",
-        client: req.peer_addr().map(|a| a.ip().to_string()),
-        token: token.as_ref().map(|t| t.name.clone()),
-        hop: req.headers().contains_key(crate::domain::remote::HOP_HEADER),
-    };
-    let idempotency = match idempotency_key(&req, token.as_ref()) {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
-    submit(
-        state.get_ref().clone(),
-        request,
-        "Test page sent to printer",
-        None,
         callback,
         idempotency,
     )

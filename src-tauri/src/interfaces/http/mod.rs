@@ -33,7 +33,7 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
         .route("/print", web::post().to(handlers::jobs::print))
         .route("/print-ready", web::post().to(handlers::incoming::print_ready))
         .route("/preflight", web::post().to(handlers::jobs::preflight))
-        .route("/test-page", web::post().to(handlers::jobs::test_page))
+        .route("/test-page", web::post().to(handlers::test_page::test_page))
         .route("/templates", web::get().to(handlers::presets::templates))
         .route("/print-template", web::post().to(handlers::jobs::print_template));
 }

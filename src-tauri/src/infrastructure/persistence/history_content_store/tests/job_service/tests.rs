@@ -131,9 +131,12 @@ impl PdfEngine for FakePdf {
 }
 
 #[derive(Default)]
-struct FakeHistory(Mutex<Vec<HistoryEntry>>);
+struct FakeHistory(Mutex<Vec<HistoryEntry>>, bool);
 impl HistoryRepository for FakeHistory {
     fn append(&self, entry: &HistoryEntry) -> Result<(), String> {
+        if self.1 {
+            return Err("history append unavailable".into());
+        }
         self.0.lock().unwrap().push(entry.clone());
         Ok(())
     }
@@ -158,7 +161,9 @@ impl HistoryRepository for FakeHistory {
     fn search(&self, _query: &str, _page: usize, _per_page: usize) -> Result<HistoryPage, String> {
         unreachable!()
     }
-    fn prune(&self, _retention_days: u32) {}
+    fn prune(&self, _retention_days: u32) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 fn state(printer: Arc<FakePrinter>, pdf: Arc<FakePdf>, history: Arc<dyn HistoryRepository>) -> AppState {
@@ -478,6 +483,34 @@ fn printer_rejection_keeps_the_final_pdf_for_error_investigation() {
         b"%PDF-final-output"
     );
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn history_append_failure_after_submission_returns_unknown_outcome() {
+    let printer = Arc::new(FakePrinter {
+        present: true,
+        ..Default::default()
+    });
+    let history = Arc::new(FakeHistory(Mutex::new(Vec::new()), true));
+    let state = state(
+        printer.clone(),
+        Arc::new(FakePdf {
+            layout_error: false,
+            sheet_count: 1,
+        }),
+        history.clone(),
+    );
+    let job_id = "history-write-failure-job".to_string();
+    let mut request = request(None);
+    request.job_id = Some(job_id.clone());
+
+    let result = run(&state, request);
+    assert!(matches!(
+        result,
+        Err(JobError::OutcomeUnknown { job_id: returned, .. }) if returned == job_id
+    ));
+    assert_eq!(*printer.print_calls.lock().unwrap(), vec![(1, 3)]);
+    assert!(history.0.lock().unwrap().is_empty());
 }
 
 #[test]

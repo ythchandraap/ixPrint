@@ -15,6 +15,7 @@ fn entry(time: &str, success: bool) -> HistoryEntry {
         settings: serde_json::json!({}),
         success,
         error: None,
+        error_code: None,
         duration_ms: 1,
         callback: None,
         remote: None,
@@ -91,13 +92,44 @@ fn groups_by_day_and_prunes() {
     assert_eq!((f.total, f.failed, f.entries.len()), (1, 1, 1));
     assert!(!f.entries[0].success);
 
-    h.prune(30);
+    h.prune(30).unwrap();
     assert_eq!(h.days().len(), 1);
     assert!(
         !old_content.exists(),
         "content follows the same history retention window"
     );
     assert!(h.read_day("../etc").is_err());
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn retention_keeps_metadata_and_content_for_an_active_job() {
+    let dir = std::env::temp_dir().join(format!("ixprint-active-retention-{}", uuid::Uuid::new_v4()));
+    let h = History::new(dir.clone());
+    let mut active = entry("2001-01-01T08:00:00+07:00", true);
+    active.content = Some(HistoryContentStatus {
+        input_kind: Some(HistoryInputKind::Json),
+        input_saved: true,
+        output: HistoryOutputState::NotCreated,
+    });
+    h.save_input_json(&active, &serde_json::json!({ "active": true }))
+        .unwrap();
+    h.append(&active).unwrap();
+    h.content_job_started(&active.id);
+    let content = dir
+        .join("history-content")
+        .join("2001-01-01")
+        .join(&active.id)
+        .join("input.json");
+
+    h.prune(30).unwrap();
+    assert!(h.find(&active.id).is_some());
+    assert!(content.is_file());
+
+    h.content_job_finished(&active.id);
+    h.prune(30).unwrap();
+    assert!(h.find(&active.id).is_none());
+    assert!(!content.exists());
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -182,7 +214,7 @@ fn prune_removes_orphan_jobs_and_partial_files_but_keeps_retained_content() {
     fs::create_dir_all(&orphan).unwrap();
     fs::write(orphan.join(".output.pdf.tmp-crash"), b"partial").unwrap();
 
-    history.prune(90);
+    history.prune(90).unwrap();
     assert!(job_dir.join("input.json").is_file());
     assert!(!partial.exists());
     assert!(!orphan.exists());
