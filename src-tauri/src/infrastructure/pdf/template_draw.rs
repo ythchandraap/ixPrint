@@ -1,11 +1,22 @@
 use crate::domain::settings::{mm_to_pt, pt_to_mm};
-use crate::domain::template::{fill, Element, HAlign, ImageFit, Record, VAlign};
+use crate::domain::template::{fill, Element, HAlign, ImageFit, Record, TextFont, TextWeight, VAlign};
 use crate::infrastructure::pdf::canvas::{wrap, Canvas};
 use pdfium_render::prelude::*;
 
 pub(super) struct Fonts {
-    pub(super) regular: PdfFontToken,
-    pub(super) bold: PdfFontToken,
+    pub(super) helvetica_regular: PdfFontToken,
+    pub(super) helvetica_bold: PdfFontToken,
+    pub(super) times_regular: PdfFontToken,
+    pub(super) times_bold: PdfFontToken,
+    pub(super) courier_regular: PdfFontToken,
+    pub(super) courier_bold: PdfFontToken,
+    pub(super) instrument_sans_regular: PdfFontToken,
+    pub(super) instrument_sans_medium: PdfFontToken,
+    pub(super) instrument_sans_semibold: PdfFontToken,
+    pub(super) instrument_sans_bold: PdfFontToken,
+    pub(super) ibm_plex_mono_regular: PdfFontToken,
+    pub(super) ibm_plex_mono_medium: PdfFontToken,
+    pub(super) ibm_plex_mono_semibold: PdfFontToken,
 }
 
 /// Lays text into its box: wrapping, shrinking to fit, alignment.
@@ -16,13 +27,29 @@ fn draw_text(
     text: &str,
     (x, y, w, h): (f32, f32, f32, f32),
     size: f32,
-    bold: bool,
+    family: TextFont,
+    weight: TextWeight,
     align: HAlign,
     valign: VAlign,
     do_wrap: bool,
     fit: bool,
 ) -> Result<(), PdfiumError> {
-    let font = if bold { fonts.bold } else { fonts.regular };
+    let font = match (family, weight) {
+        (TextFont::Helvetica, TextWeight::Bold) => fonts.helvetica_bold,
+        (TextFont::Helvetica, _) => fonts.helvetica_regular,
+        (TextFont::Times, TextWeight::Bold) => fonts.times_bold,
+        (TextFont::Times, _) => fonts.times_regular,
+        (TextFont::Courier, TextWeight::Bold) => fonts.courier_bold,
+        (TextFont::Courier, _) => fonts.courier_regular,
+        (TextFont::InstrumentSans, TextWeight::Regular) => fonts.instrument_sans_regular,
+        (TextFont::InstrumentSans, TextWeight::Medium) => fonts.instrument_sans_medium,
+        (TextFont::InstrumentSans, TextWeight::SemiBold) => fonts.instrument_sans_semibold,
+        (TextFont::InstrumentSans, TextWeight::Bold) => fonts.instrument_sans_bold,
+        (TextFont::IbmPlexMono, TextWeight::Regular) => fonts.ibm_plex_mono_regular,
+        (TextFont::IbmPlexMono, TextWeight::Medium) => fonts.ibm_plex_mono_medium,
+        (TextFont::IbmPlexMono, TextWeight::SemiBold) => fonts.ibm_plex_mono_semibold,
+        (TextFont::IbmPlexMono, TextWeight::Bold) => fonts.ibm_plex_mono_semibold,
+    };
     let layout = |size: f32| -> Vec<String> {
         text.split('\n')
             .flat_map(|para| {
@@ -103,6 +130,8 @@ pub(super) fn draw_element(c: &mut Canvas, fonts: &Fonts, el: &Element, record: 
             h,
             text,
             size,
+            font,
+            weight,
             bold,
             align,
             valign,
@@ -117,7 +146,8 @@ pub(super) fn draw_element(c: &mut Canvas, fonts: &Fonts, el: &Element, record: 
                 &text,
                 (*x, *y, *w, *h),
                 *size,
-                *bold,
+                *font,
+                weight.unwrap_or(if *bold { TextWeight::Bold } else { TextWeight::Regular }),
                 *align,
                 *valign,
                 *wrap,
@@ -178,7 +208,8 @@ pub(super) fn draw_element(c: &mut Canvas, fonts: &Fonts, el: &Element, record: 
                     &value,
                     (*x, y + bars_h, *w, text_h),
                     size,
-                    false,
+                    TextFont::Helvetica,
+                    TextWeight::Regular,
                     HAlign::Center,
                     VAlign::Middle,
                     false,

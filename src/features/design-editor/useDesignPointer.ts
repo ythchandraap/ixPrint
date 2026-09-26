@@ -92,6 +92,10 @@ export function useDesignPointer(
         const resizedBottom = active.handle.includes("s") ? Math.max(position(bottom + dy), origin.y + 1) : bottom;
         element.x = left; element.y = top; element.w = Math.round((resizedRight - left) * 100) / 100;
         element.h = Math.round((resizedBottom - top) * 100) / 100;
+        if (element.type === "text" && origin.type === "text") {
+          const scale = Math.min(1, element.w / origin.w, element.h / origin.h);
+          element.size = Math.max(2, Math.round(origin.size * scale * 100) / 100);
+        }
       }
     }
   }
