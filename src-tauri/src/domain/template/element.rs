@@ -139,6 +139,17 @@ pub enum Element {
 }
 
 impl Element {
+    pub(super) fn id(&self) -> &str {
+        match self {
+            Element::Text { id, .. }
+            | Element::Line { id, .. }
+            | Element::Rect { id, .. }
+            | Element::Barcode { id, .. }
+            | Element::Qr { id, .. }
+            | Element::Image { id, .. } => id,
+        }
+    }
+
     /// Top edge in mm; decides which band (header / row / footer) an element is in.
     pub(crate) fn top(&self) -> f32 {
         match self {

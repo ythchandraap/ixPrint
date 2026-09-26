@@ -20,6 +20,10 @@ import OnboardingDialog from "@/features/settings/OnboardingDialog.vue";
 import { api } from "@/shared/api";
 
 const incomingJobId = ref("");
+const designEditorActive = ref(false);
+const designEditorDirty = ref(false);
+const leaveRequestToken = ref(0);
+let pendingEditorNavigation: (() => void) | null = null;
 const knownIncomingIds = new Set<string>();
 let incomingPollTimer: number | undefined;
 let incomingInitialLoad = true;
@@ -55,6 +59,25 @@ function closeIncomingReview() {
   incomingJobId.value = "";
   requestAnimationFrame(() => reviewReturnFocus?.focus());
   reviewReturnFocus = null;
+}
+
+function requestEditorAwareNavigation(action: () => void) {
+  if (designEditorActive.value && designEditorDirty.value) {
+    pendingEditorNavigation = action;
+    leaveRequestToken.value++;
+    return;
+  }
+  action();
+}
+
+function resolveEditorLeave(decision: "save" | "discard" | "cancel") {
+  if (decision === "cancel") {
+    pendingEditorNavigation = null;
+    return;
+  }
+  const action = pendingEditorNavigation;
+  pendingEditorNavigation = null;
+  action?.();
 }
 
 onMounted(() => {
@@ -120,7 +143,7 @@ const {
 </script>
 
 <template>
-  <div class="app">
+  <div :class="['app', { 'design-workspace-active': designEditorActive }]">
     <div class="top" :inert="!!incomingJobId">
       <AppHeader
         :product="PRODUCT"
@@ -133,8 +156,8 @@ const {
         :ip-state="ipState"
         :config="config"
         :address="address"
-        @open-print="openPrintPage()"
-        @toggle-settings="toggleSettings()"
+        @open-print="requestEditorAwareNavigation(() => openPrintPage())"
+        @toggle-settings="requestEditorAwareNavigation(() => toggleSettings())"
         @toggle-bridge="toggleBridge"
         @copy="copy"
       />
@@ -154,7 +177,7 @@ const {
         </button>
         <strong>{{ settingsTitle }}</strong>
       </nav>
-      <nav v-else class="tabs">
+      <nav v-else-if="!designEditorActive" class="tabs">
         <button :class="{ on: !printPageOpen && tab === 'printers' }" @click="selectTab('printers')">Printers</button>
         <button :class="{ on: !printPageOpen && tab === 'presets' }" @click="selectTab('presets')">Presets</button>
         <button :class="{ on: !printPageOpen && tab === 'history' }" @click="selectTab('history')">History</button>
@@ -265,15 +288,23 @@ const {
             @config="setConfig"
             @notify="notify"
             @open-print="openPrintPage"
+            @design-editor-active="designEditorActive = $event"
+            @design-editor-dirty="designEditorDirty = $event"
+            @design-editor-leave-decision="resolveEditorLeave"
           >
-            <template #design-editor="{ presetName, template, localIp: editorLocalIp, serverPort, apply, cancel }">
+            <template #design-editor="{ presetName, template, localIp: editorLocalIp, serverPort, saveDesign, saving, saveError, cancel }">
               <DesignEditor
                 :preset-name="presetName"
                 :template="template"
                 :local-ip="editorLocalIp"
                 :server-port="serverPort"
-                @apply="apply"
+                :save-design="saveDesign"
+                :saving="saving"
+                :save-error="saveError"
+                :leave-request-token="leaveRequestToken"
                 @cancel="cancel"
+                @dirty-change="designEditorDirty = $event"
+                @leave-decision="resolveEditorLeave"
               />
             </template>
           </PresetsTab>
@@ -293,7 +324,7 @@ const {
       </section>
     </div>
 
-    <footer class="colophon" :inert="!!incomingJobId">
+    <footer v-if="!designEditorActive" class="colophon" :inert="!!incomingJobId">
       <span>{{ PRODUCT }}{{ version ? ` ${version}` : "" }}{{ osLabel ? ` · ${osLabel}` : "" }}</span>
       <span class="grow"></span>
       <span>IX Systems / {{ BRAND }}</span>

@@ -11,13 +11,24 @@ const props = defineProps<{
   scale: number;
   preview: string;
   showGrid: boolean;
+  showRulers: boolean;
+  showBands: boolean;
+  showObjectBounds: boolean;
   selected: number | null;
+  selectedElementIds: string[];
+  selectedGroups: { id: string; box: { x: number; y: number; w: number; h: number } }[];
+  isElementInsideFocus: (id: string) => boolean;
+  onDoubleClickElement: (id: string) => void;
   bbox: (element: TemplateElement) => { x: number; y: number; w: number; h: number };
   startDrag: (event: PointerEvent, index: number, kind: PointerAction) => void;
 }>();
 const resizeHandles: ResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 const qrResizeHandles: ResizeHandle[] = ["se"];
-const emit = defineEmits<{ width: [value: number]; "clear-selection": [] }>();
+const emit = defineEmits<{
+  "viewport-size": [value: { width: number; height: number }];
+  "clear-selection": [];
+  "select-from-canvas": [id: string];
+}>();
 const holder = ref<HTMLElement | null>(null);
 const rulerStep = computed(() => [5, 10, 20, 50, 100, 200, 500, 1000].find((mm) => mm * props.scale >= 48) ?? 2000);
 function ticks(length: number) {
@@ -45,7 +56,7 @@ onMounted(() => {
     if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame);
     resizeFrame = requestAnimationFrame(() => {
       resizeFrame = undefined;
-      emit("width", width);
+      emit("viewport-size", { width, height: entry.contentRect.height });
     });
   });
   if (holder.value) observer.observe(holder.value);
@@ -56,10 +67,10 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <div ref="holder" class="holder">
-    <div class="canvas-frame">
-      <div class="ruler-corner" aria-hidden="true">mm</div>
-      <div class="ruler ruler-x" :style="{ width: `${widthMm * scale}px` }" aria-hidden="true">
+  <div ref="holder" class="holder" :class="{ 'has-bands': list }">
+    <div class="canvas-frame" :style="{ gridTemplateColumns: `${showRulers ? 28 : 0}px ${list ? 54 : 0}px auto`, gridTemplateRows: `${showRulers ? 28 : 0}px auto` }">
+      <div v-if="showRulers" class="ruler-corner" aria-hidden="true">mm</div>
+      <div v-if="showRulers" class="ruler ruler-x" :style="{ width: `${widthMm * scale}px`, gridColumn: 3 }" aria-hidden="true">
         <div
           v-for="tick in xTicks"
           :key="tick.mm"
@@ -69,7 +80,7 @@ onBeforeUnmount(() => {
           <span v-if="tick.major">{{ tick.mm }}</span>
         </div>
       </div>
-      <div class="ruler ruler-y" :style="{ height: `${heightMm * scale}px` }" aria-hidden="true">
+      <div v-if="showRulers" class="ruler ruler-y" :style="{ height: `${heightMm * scale}px`, gridRow: 2 }" aria-hidden="true">
         <div
           v-for="tick in yTicks"
           :key="tick.mm"
@@ -79,24 +90,38 @@ onBeforeUnmount(() => {
           <span v-if="tick.major">{{ tick.mm }}</span>
         </div>
       </div>
+      <div v-if="list" class="band-gutter" aria-hidden="true">
+        <template v-if="showBands">
+          <span class="band-gutter-label" :style="{ top: '2px' }">HEADER</span>
+          <span class="band-gutter-label" :style="{ top: `${list.header_mm * scale + 2}px` }">ROW</span>
+          <span class="band-gutter-label" :style="{ top: `${(list.header_mm + list.row_mm) * scale + 2}px` }">FOOTER</span>
+        </template>
+      </div>
       <div
         class="stage"
         tabindex="0"
-        :style="{ width: `${widthMm * scale}px`, height: `${heightMm * scale}px` }"
+        :style="{ width: `${widthMm * scale}px`, height: `${heightMm * scale}px`, gridColumn: 3, gridRow: 2 }"
         @pointerdown.self="emit('clear-selection')"
       >
         <img v-if="preview" :src="preview" class="render" alt="" draggable="false" />
         <div v-if="showGrid" class="canvas-grid" :style="{ backgroundSize: `${5 * scale}px ${5 * scale}px` }" aria-hidden="true"></div>
-        <template v-if="list">
-          <div class="band-label" :style="{ top: '0px' }">HEADER</div>
+        <template v-if="list && showBands">
           <div class="band-line" :style="{ top: `${list.header_mm * scale}px` }"></div>
-          <div class="band-label" :style="{ top: `${list.header_mm * scale}px` }">ROW (repeated)</div>
           <div class="band-line" :style="{ top: `${(list.header_mm + list.row_mm) * scale}px` }"></div>
-          <div class="band-label" :style="{ top: `${(list.header_mm + list.row_mm) * scale}px` }">FOOTER</div>
         </template>
+        <div
+          v-for="group in selectedGroups"
+          :key="group.id"
+          class="group-selection-box"
+          :style="{
+            left: `${group.box.x * scale}px`, top: `${group.box.y * scale}px`,
+            width: `${group.box.w * scale}px`, height: `${group.box.h * scale}px`,
+          }"
+          aria-hidden="true"
+        ></div>
         <template v-for="(el, i) in elements" :key="el.id || i">
           <div
-            :class="['box', { on: selected === i }]"
+          :class="['box', { on: selected === i || selectedElementIds.includes(el.id), bounds: showObjectBounds, dimmed: !isElementInsideFocus(el.id) }]"
             :style="{
               left: `${bbox(el).x * scale}px`,
               top: `${bbox(el).y * scale}px`,
@@ -104,7 +129,8 @@ onBeforeUnmount(() => {
               height: `${bbox(el).h * scale}px`,
             }"
             :title="typeLabel[el.type]"
-            @pointerdown="startDrag($event, i, 'move')"
+            @pointerdown="emit('select-from-canvas', el.id); startDrag($event, i, 'move')"
+            @dblclick.stop="onDoubleClickElement(el.id)"
           >
             <template v-if="selected === i && el.type !== 'line'">
               <span

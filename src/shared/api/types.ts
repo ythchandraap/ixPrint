@@ -87,7 +87,15 @@ export type DesignLayout =
       footer: "last_page" | "every_page";
       /** Page height follows the content (receipt roll). */
       roll: boolean;
-    };
+  };
+
+/** Editing-only hierarchy. Element coordinates and render order remain flat. */
+export interface TemplateGroup {
+  id: string;
+  name: string;
+  parentGroupId: string | null;
+  elementIds: string[];
+}
 
 /** A preset's WYSIWYG design (label/receipt with {{field}} placeholders). */
 export interface Template {
@@ -97,6 +105,8 @@ export interface Template {
   height_mm: number;
   layout?: DesignLayout;
   elements: TemplateElement[];
+  /** Optional for compatibility with templates saved before groups existed. */
+  groups?: TemplateGroup[];
   /** Example data for the preview and test prints. */
   sample: TemplateRecord;
   /** Optional validation contract for incoming JSON data. */
