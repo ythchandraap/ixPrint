@@ -293,7 +293,8 @@ textarea.json-body {
 				<ol>
 					<li>Fetch the printer list (<code>GET /list-printer</code>) and presets (<code>GET /presets</code>) if needed.</li>
 					<li>Send a PDF to <code>POST /print</code> as <code>multipart/form-data</code> (the first file field is used), with settings in the query string — or, for a designed preset, send JSON data to the same endpoint.</li>
-			<li>Save the <code>job_id</code> from the response, then poll <code>GET /job-status</code> for queue position, printer errors or completion.</li>
+					<li>Send a unique <code>Idempotency-Key</code> for each deliberate print. Reuse it only when retrying the exact same request.</li>
+					<li>Save the <code>job_id</code> from the response, then poll <code>GET /job-status</code> every 2 seconds, stopping at a final state or after 10 minutes.</li>
 				</ol>
 				<h3>Settings precedence</h3>
 				<p>Request parameters → preset (<code>preset=…</code> or this computer's default preset) → built-in defaults.
@@ -308,10 +309,8 @@ textarea.json-body {
 				<p>Tokens are created in the ix.print window → <b>API</b> tab (one token per application; tokens can be revoked at any time).
 				<b>Require a token</b> is enabled by default: every endpoint except <code>/</code> and <code>/docs</code> rejects requests without a token with <b>401</b>.
 				Invalid or revoked tokens are always rejected.</p>
-				<p>Send the token in one of these ways (in recommended order):</p>
-				<pre>Authorization: Bearer fxp_…
-X-Api-Token: fxp_…
-?token=fxp_…      // convenient, but recorded in logs and browser history</pre>
+				<p>Use <code>Authorization: Bearer</code> for new integrations. <code>X-Api-Token</code> is also accepted. The <code>?token=</code> query form remains for compatibility, but avoid it because URLs can appear in browser history, copied links, or intermediary logs.</p>
+				<pre>Authorization: Bearer fxp_…</pre>
 				<p class="note">Fill in the <b>Token</b> field above so the "Try it" buttons and code examples on this page use your token. The token is stored only in this browser.
 				Do not put a token in public-page JavaScript; keep it on your web app's server where possible.</p>
 				<p class="note"><code>GET /presets/shared</code> and <code>GET /presets/shared/export</code> always require a valid bearer token, even when <b>Require a token</b> is off. They do not accept <code>X-Api-Token</code> or a query token. Shared preset listing is separately controlled in the Presets tab and is off by default. The older <code>/presets</code> and <code>/presets/export</code> endpoints retain their existing behavior and token methods.</p>
@@ -360,7 +359,7 @@ X-Api-Token: fxp_…
 						<tr><td><code>failed</code></td><td>ix.print could not send the job; <code>message</code> explains why.</td></tr>
 					</tbody>
 				</table></div>
-				<p class="note">Poll every 2–3 seconds until <code>completed</code>, <code>gone</code> or <code>failed</code>. Live queue status is available for recent jobs; older jobs remain in retained History.</p>
+				<p class="note">Poll every 2–3 seconds until <code>completed</code>, <code>gone</code> or <code>failed</code>, with a bounded timeout such as 10 minutes. <code>completed</code> means the spooler reports completion, not that paper was physically produced. For <code>gone</code>, check ix.print History and the operating-system printer queue. Older jobs remain in retained History.</p>
 			</div>
 		</section>
 
@@ -419,11 +418,12 @@ $ok = abs(time() - (int) $ts) &lt; 300 &amp;&amp; hash_equals($expected, $_SERVE
 		<section id="errors">
 			<h2>Errors</h2>
 			<div class="card">
-				<p>Errors are returned as JSON <code>{"message": "…"}</code>:</p>
+				<p>Errors are returned as JSON. Preserve the HTTP status and any fields such as <code>code</code> or <code>job_id</code> when handling them:</p>
 				<ul>
 					<li><b>400</b> — invalid parameter, missing preset, missing printer, or paper size exceeds the printer limit.</li>
 					<li><b>401</b> — token missing (when required), invalid or revoked.</li>
 					<li><b>404</b> — printer or job not found (read endpoint).</li>
+					<li><b>409</b> — idempotency conflict, or <code>code: "outcome_unknown"</code>. For an unknown outcome, check History and the operating-system printer queue before deciding to create a new job; do not retry with a new key automatically.</li>
 					<li><b>413</b> — file lebih dari 200 MB.</li>
 					<li><b>500</b> — document could not be opened or the printer rejected the job.</li>
 				</ul>
@@ -524,7 +524,7 @@ const ENDPOINTS = [
 	},
 	{
 		id: "test-page", group: "Print", method: "POST", path: "/test-page", title: "Print paper edge test",
-		desc: "A calibration page matching the job paper: a frame at the paper edge and millimetre rulers on each side. No upload; parameters are the same as <code>/print</code>.",
+		desc: "A calibration page matching the job paper: a frame at the paper edge and millimetre rulers on each side. No upload; parameters are the same as <code>/print</code>. Send a unique <code>Idempotency-Key</code> per deliberate print and reuse it for an exact retry.",
 		params: [{ name: "count", kind: "number", min: 1, max: 50, values: "1–50", def: "1", desc: "Number of test pages (numbered)." }, ...CALLBACK_PARAMS, ...PRINT_PARAMS],
 		follow: true,
 	},
@@ -546,6 +546,22 @@ const ENDPOINTS = [
 		example: '{"message":"Data sent to printer","job_id":"…","printer":"Zebra","preset":"label-produk","sheets":2,"spooler_job":"Zebra-651","status":{"state":"queued","position":1,"ahead":0}}',
 	},
 	{
+		id: "print-template", group: "Print", method: "POST", path: "/print-template", title: "Print with a designed preset (legacy)",
+		desc: "Legacy endpoint for printing data with a preset design. It supports <code>Idempotency-Key</code> like the other print endpoints. For new integrations, prefer <code>POST /print</code> with <code>preset</code> in the JSON body.",
+		params: [],
+		json: true,
+		follow: true,
+		bodyDocs: [
+			["template", "required", "Name of a published preset with a design."],
+			["data", "required", "One object or an array of objects to print."],
+			["header", "optional", "Values shared by records."],
+			["settings", "optional", 'Print settings such as <code>{"printer":"…","copies":2}</code>.'],
+			["callback_url", "optional", 'URL that receives the print result (JSON POST). Requires a token. See <a href="#callback">Callback</a>.'],
+			["callback_ref", "optional", "Your ID (max. 200 characters), returned in the callback as <code>reference</code>."],
+		],
+		example: '{"template":"label-produk","data":[{"nama":"Product A","kode":"SKU-001"}]}',
+	},
+	{
 		id: "preflight", group: "Print", method: "POST", path: "/preflight", title: "Validate data without printing",
 		desc: "Send the same JSON as a designed-preset print request. Returns <code>valid</code>, <code>errors</code>, expected <code>fields</code>, <code>required_fields</code> and record count. It never sends a job to the printer.",
 		params: [], json: true,
@@ -564,7 +580,13 @@ const tokenInput = document.getElementById("token");
 try { tokenInput.value = localStorage.getItem("ixprint.docsToken") || ""; } catch { /* storage blocked */ }
 const token = () => tokenInput.value.trim();
 const authHeaders = () => (token() ? { Authorization: `Bearer ${token()}` } : {});
-const api = (url, init = {}) => fetch(url, { ...init, headers: { ...(init.headers || {}), ...authHeaders() } });
+const api = (url, init = {}, auth = authHeaders()) => fetch(url, { ...init, headers: { ...auth, ...(init.headers || {}) } });
+
+function newIdempotencyKey() {
+	const bytes = new Uint8Array(16);
+	crypto.getRandomValues(bytes);
+	return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 function el(tag, attrs = {}, ...children) {
 	const node = document.createElement(tag);
@@ -619,41 +641,114 @@ function queryOf(form) {
 	return q.toString();
 }
 
+const JOB_STATES = ["queued", "printing", "paused", "error", "completed", "gone", "failed"];
+const FINAL = ["completed", "gone", "failed"];
+
+function hasKnownJobState(status) {
+	return status !== null && typeof status === "object" && !Array.isArray(status) && JOB_STATES.includes(status.state);
+}
+
 function snippets(ep, form) {
 	const qs = queryOf(form);
 	const url = `${BASE}${ep.path}${qs ? "?" + qs : ""}`;
 	const fileName = form.querySelector("input[type=file]")?.files[0]?.name || "dokumen.pdf";
 	const needsToken = ep.path !== "/";
+	const isPrint = Boolean(ep.follow);
 	const tok = token() || "YOUR_TOKEN";
-	const h = needsToken ? ` -H "Authorization: Bearer ${tok}"` : "";
-	const hdr = needsToken ? `headers: { Authorization: "Bearer ${tok}" }` : "";
+	const curlAuth = needsToken ? ` -H "Authorization: Bearer ${tok}"` : "";
+	const curlIdempotency = isPrint ? ' -H "Idempotency-Key: YOUR_UNIQUE_KEY"' : "";
+	const authHeader = needsToken ? `Authorization: ${JSON.stringify(`Bearer ${tok}`)}` : null;
+	const fetchHeaders = [
+		authHeader,
+		isPrint ? '"Idempotency-Key": idempotencyKey' : null,
+		ep.json ? '"Content-Type": "application/json"' : null,
+	].filter(Boolean).join(", ");
 	let curl;
 	let fetchCode;
 	const jsonBody = form.querySelector("textarea.json-body")?.value?.trim();
+	let prettyBody = jsonBody || "{}";
+	try { prettyBody = JSON.stringify(JSON.parse(prettyBody), null, 2); } catch { /* keep as typed */ }
+	let compactBody = jsonBody || "{}";
+	try { compactBody = JSON.stringify(JSON.parse(compactBody)); } catch { /* keep as typed */ }
+	const curlFollow = isPrint
+		? `\n\n# Read job_id from the response and replace JOB_ID below. Repeat every 2 seconds, stopping at completed/gone/failed or after 10 minutes.\ncurl -i${curlAuth} "${BASE}/job-status?job_id=JOB_ID"`
+		: "";
+	const readResponse = [
+		"async function readApiResponse(response) {",
+		"  const text = await response.text();",
+		"  let data = null;",
+		"  try { data = text ? JSON.parse(text) : null; } catch { data = { message: text }; }",
+		"  if (!response.ok) {",
+		"    const error = Object.assign(new Error(data?.message || `${response.status} ${response.statusText}`), {",
+		"      status: response.status, code: data?.code, job_id: data?.job_id,",
+		"    });",
+		"    console.error(\"HTTP request failed:\", { status: error.status, code: error.code, message: error.message, job_id: error.job_id });",
+		"    if (error.code === \"outcome_unknown\") console.error(\"Check ix.print History and the operating-system printer queue before deciding on a new job. Do not resubmit automatically.\");",
+		"    throw error;",
+		"  }",
+		"  return data;",
+		"}",
+	].join("\n");
+	const validatePrintResponse = isPrint ? [
+		"if (!data || typeof data !== \"object\" || Array.isArray(data) || typeof data.job_id !== \"string\" || !data.job_id.trim()) {",
+		"  console.error(\"Print response has no valid job_id. Retry this exact request with the same persisted key.\", idempotencyKey);",
+		"  throw new Error(\"Print response did not include a valid job_id.\");",
+		"}",
+	].join("\n") : "";
+	const waitForJob = isPrint ? [
+		"async function waitForJob(jobId) {",
+		"  const deadline = Date.now() + 600_000;",
+		"  while (Date.now() < deadline) {",
+		`    const statusUrl = new URL(${JSON.stringify(`${BASE}/job-status`)});`,
+		"    statusUrl.searchParams.set(\"job_id\", jobId);",
+		"    const controller = new AbortController();",
+		"    const requestTimeout = setTimeout(() => controller.abort(), 5_000);",
+		"    let status;",
+		"    try {",
+		`      status = await readApiResponse(await fetch(statusUrl, { headers: { ${authHeader} }, signal: controller.signal }));`,
+		"    } catch (error) {",
+		"      console.error(\"Could not read job status. Keep job_id and check /job-status; do not submit another print.\", error);",
+		"      return;",
+		"    } finally {",
+		"      clearTimeout(requestTimeout);",
+		"    }",
+		`    if (!status || typeof status !== "object" || Array.isArray(status) || !${JSON.stringify(JOB_STATES)}.includes(status.state)) {`,
+		"      console.error(\"Invalid /job-status response (missing or unknown state). Polling stopped; keep jobId and check /job-status or History.\", status);",
+		"      return;",
+		"    }",
+		"    console.log(\"Job status:\", status.state, status.position, status.message);",
+		"    if (status.state === \"completed\") console.info(\"The spooler reports completion; this does not confirm physical output.\");",
+		"    if (status.state === \"gone\") console.warn(\"The job left the queue. Check History and the printer queue for its outcome.\");",
+		`    if (${JSON.stringify(FINAL)}.includes(status.state)) return status;`,
+		"    await new Promise((resolve) => setTimeout(resolve, 2_000));",
+		"  }",
+		"  console.warn(\"Stopped polling after 10 minutes. The job may still be active; keep job_id and check /job-status.\");",
+		"}",
+	].join("\n") : "";
+	const idempotencySetup = isPrint ? [
+		"// App-specific integration: replace loadPrintRecord/logicalPrintId with your storage lookup.",
+		"// It must return the same record on retries, shaped like { idempotencyKey: \"...\" }.",
+		"// Persist a new key before the first request; use a new logicalPrintId for a deliberate new print.",
+		"const printRecord = await loadPrintRecord(logicalPrintId);",
+		"const idempotencyKey = printRecord?.idempotencyKey;",
+		"if (typeof idempotencyKey !== \"string\" || !idempotencyKey.trim()) throw new Error(\"Persist an idempotency key before sending the first request.\");",
+	].join("\n") : "";
 	if (ep.json) {
-		let compact = jsonBody || "{}";
-		try { compact = JSON.stringify(JSON.parse(compact)); } catch { /* keep as typed */ }
-		curl = `curl${h} -H "Content-Type: application/json" -d '${compact.replace(/'/g, "'\\''")}' "${url}"`;
-		let pretty = jsonBody || "{}";
-		try { pretty = JSON.stringify(JSON.parse(pretty), null, 2); } catch { /* keep as typed */ }
-		fetchCode = `const res = await fetch("${url}", {\n  method: "POST",\n  headers: { "Content-Type": "application/json"${needsToken ? `, Authorization: "Bearer ${tok}"` : ""} },\n  body: JSON.stringify(${pretty.replace(/\n/g, "\n  ")}),\n});\nconst data = await res.json();\nif (!res.ok) throw new Error(data.message);\nconsole.log(${ep.path === "/preflight" ? "data.valid, data.errors" : "data.job_id, data.status"});`;
+		curl = `curl -i${curlAuth}${curlIdempotency} -H "Content-Type: application/json" -d '${compactBody.replace(/'/g, "'\\''")}' "${url}"${curlFollow}`;
+		fetchCode = `${idempotencySetup ? `${idempotencySetup}\n\n` : ""}${ep.method === "POST" ? `${readResponse}\n\n` : ""}${waitForJob ? `${waitForJob}\n\n` : ""}const body = ${prettyBody.replace(/\n/g, "\n  ")};\nlet response;\ntry {\n  response = await fetch(${JSON.stringify(url)}, {\n    method: "POST",\n    headers: { ${fetchHeaders} },\n    body: JSON.stringify(body),\n  });\n} catch (error) {\n  ${isPrint ? 'console.error("No HTTP response. Retry this exact request with the same idempotency key.", idempotencyKey);\n  ' : ""}throw error;\n}\nlet data;\ntry { data = await readApiResponse(response); }\ncatch (error) {\n  ${isPrint ? 'if (error.status == null) console.error("Could not read the response. Retry this exact request with the same idempotency key.", idempotencyKey);\n  ' : ""}throw error;\n}\n${validatePrintResponse ? `${validatePrintResponse}\n` : ""}console.log(${ep.path === "/preflight" ? "data.valid, data.errors" : "data.job_id, data.status"});${isPrint ? "\nif (data.job_id) await waitForJob(data.job_id);" : ""}`;
 	} else if (ep.file) {
-		curl = `curl${h} -F "file=@${fileName}" "${url}"`;
-		fetchCode = `const body = new FormData();\nbody.append("file", fileInput.files[0]); // <input type="file">\n\nconst res = await fetch("${url}", {\n  method: "POST",\n  ${hdr},\n  body,\n});\nconst data = await res.json();\nif (!res.ok) throw new Error(data.message);\nconsole.log(data.job_id, data.status);`;
+		curl = `curl -i${curlAuth}${curlIdempotency} -F "file=@${fileName}" "${url}"${curlFollow}`;
+		fetchCode = `${idempotencySetup}\n\n${readResponse}\n\n${waitForJob}\n\nconst fileInput = document.querySelector('input[type="file"]');\nif (!fileInput?.files?.[0]) throw new Error("Choose a PDF file before submitting.");\nconst body = new FormData();\nbody.append("file", fileInput.files[0]);\nlet response;\ntry {\n  response = await fetch(${JSON.stringify(url)}, { method: "POST", headers: { ${fetchHeaders} }, body });\n} catch (error) {\n  console.error("No HTTP response. Retry this exact request with the same idempotency key.", idempotencyKey);\n  throw error;\n}\nlet data;\ntry { data = await readApiResponse(response); }\ncatch (error) {\n  if (error.status == null) console.error("Could not read the response. Retry this exact request with the same idempotency key.", idempotencyKey);\n  throw error;\n}\n${validatePrintResponse}\nconsole.log(data.job_id, data.status);\nif (data.job_id) await waitForJob(data.job_id);`;
 	} else if (ep.method === "POST") {
-		curl = `curl -X POST${h} "${url}"`;
-		fetchCode = `const res = await fetch("${url}", { method: "POST", ${hdr} });\nconst data = await res.json();\nif (!res.ok) throw new Error(data.message);\nconsole.log(data);`;
+		curl = `curl -i -X POST${curlAuth}${curlIdempotency} "${url}"${curlFollow}`;
+		fetchCode = `${idempotencySetup ? `${idempotencySetup}\n\n` : ""}${readResponse}\n\n${waitForJob ? `${waitForJob}\n\n` : ""}let response;\ntry {\n  response = await fetch(${JSON.stringify(url)}, { method: "POST", headers: { ${fetchHeaders} } });\n} catch (error) {\n  ${isPrint ? 'console.error("No HTTP response. Retry this exact request with the same idempotency key.", idempotencyKey);\n  ' : ""}throw error;\n}\nlet data;\ntry { data = await readApiResponse(response); }\ncatch (error) {\n  ${isPrint ? 'if (error.status == null) console.error("Could not read the response. Retry this exact request with the same idempotency key.", idempotencyKey);\n  ' : ""}throw error;\n}\n${validatePrintResponse ? `${validatePrintResponse}\n` : ""}console.log(data);${isPrint ? "\nif (data.job_id) await waitForJob(data.job_id);" : ""}`;
 	} else {
-		curl = `curl${h} "${url}"`;
-		fetchCode = `const res = await fetch("${url}"${hdr ? `, { ${hdr} }` : ""});\nconst data = await ${ep.path === "/" ? "res.text()" : "res.json()"};\nconsole.log(data);`;
+		curl = `curl${curlAuth} "${url}"`;
+		fetchCode = `const response = await fetch(${JSON.stringify(url)}${authHeader ? `, { headers: { ${authHeader} } }` : ""});\nconst data = await ${ep.path === "/" ? "response.text()" : "response.json()"};\nconsole.log(data);`;
 	}
-	if (ep.follow) {
-		fetchCode += `\n\n// Pantau sampai selesai\nasync function waitForJob(jobId) {\n  for (;;) {\n    const s = await (await fetch(\`${BASE}/job-status?job_id=\${jobId}\`, { ${hdr} })).json();\n    console.log(s.state, s.position, s.message);\n    if (["completed", "gone", "failed"].includes(s.state)) return s;\n    await new Promise((r) => setTimeout(r, 2000));\n  }\n}`;
-	}
+	if (isPrint) curl = `# Use one unique key per deliberate print; keep and reuse it for an exact retry.\n${curl}`;
 	return { curl, fetch: fetchCode };
 }
-
-const FINAL = ["completed", "gone", "failed"];
 
 function describeJob(s) {
 	switch (s.state) {
@@ -668,19 +763,39 @@ function describeJob(s) {
 	}
 }
 
-async function follow(jobId, box) {
+async function follow(jobId, box, auth = authHeaders()) {
 	const started = Date.now();
 	for (;;) {
 		let s;
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), 5000);
 		try {
-			s = await (await api(`${BASE}/job-status?job_id=${encodeURIComponent(jobId)}`)).json();
+			const response = await api(`${BASE}/job-status?job_id=${encodeURIComponent(jobId)}`, { signal: controller.signal }, auth);
+			const text = await response.text();
+			try { s = text ? JSON.parse(text) : null; } catch { s = null; }
+			if (!response.ok) throw new Error(s?.message || `${response.status} ${response.statusText}`);
+			if (!hasKnownJobState(s)) throw new Error("Invalid /job-status response: missing or unknown state.");
 		} catch (e) {
-			box.textContent = `Could not read status: ${e.message}`;
+			box.textContent = `Could not read status: ${e.message}. Keep job_id and check /job-status or History; no print was resubmitted.`;
 			return;
+		} finally {
+			clearTimeout(timeout);
 		}
 		box.className = `job ${s.state || ""}`;
 		box.textContent = `Job status: ${describeJob(s)}`;
-		if (FINAL.includes(s.state) || Date.now() - started > 600000) return;
+		if (s.state === "gone") {
+			box.textContent += ". Check ix.print History and the operating-system printer queue for the outcome.";
+			return;
+		}
+		if (s.state === "completed") {
+			box.textContent += "; this does not confirm physical output.";
+			return;
+		}
+		if (FINAL.includes(s.state)) return;
+		if (Date.now() - started > 600000) {
+			box.textContent = "Stopped polling after 10 minutes. Keep this job_id and check /job-status, History, and the printer queue.";
+			return;
+		}
 		await new Promise((r) => setTimeout(r, 2000));
 	}
 }
@@ -694,12 +809,17 @@ function renderEndpoint(ep) {
 	if (ep.json) {
 		const pick = el("select", { "data-kind": "template-pick" }, el("option", { value: "" }, "— choose a designed preset to fill the example —"));
 		const body = el("textarea", { class: "json-body", rows: 10, spellcheck: "false", required: true });
-		body.value = JSON.stringify({ preset: "preset-name", data: [{ field: "value" }, { field: "value 2" }] }, null, 2);
+		const data = [{ field: "value" }, { field: "value 2" }];
+		body.value = JSON.stringify(ep.id === "print-template"
+			? { template: "preset-name", data }
+			: { preset: "preset-name", data }, null, 2);
 		pick.addEventListener("change", () => {
 			const t = state.templates.find((x) => x.name === pick.value);
 			if (!t) return;
 			const data = Object.fromEntries(t.fields.map((f) => [f, (t.sample || {})[f] ?? ""]));
-			body.value = JSON.stringify({ preset: t.name, data: [data, data] }, null, 2);
+			body.value = JSON.stringify(ep.id === "print-template"
+				? { template: t.name, data: [data, data] }
+				: { preset: t.name, data: [data, data] }, null, 2);
 			body.dispatchEvent(new Event("input", { bubbles: true }));
 		});
 		form.append(
@@ -719,12 +839,14 @@ function renderEndpoint(ep) {
 	}
 	if (!ep.params.length && !ep.file && !ep.json) form.append(el("p", { class: "note" }, "No parameters."));
 
-	const status = el("div", { class: "meta" });
+	const status = el("div", { class: "meta", "aria-live": "polite" });
 	const output = el("pre", { hidden: true });
-	const jobBox = el("div", { class: "job", hidden: true });
+	const jobBox = el("div", { class: "job", hidden: true, "aria-live": "polite" });
 	const send = el("button", { type: "submit" }, ep.method === "POST" ? "Send" : "Run");
+	const retrySame = el("button", { type: "button", hidden: true }, "Retry same request");
+	const newJob = el("button", { type: "button", class: "ghost", hidden: true }, "Print as a new job");
 	const hint = ep.method === "POST" ? el("span", { class: "note" }, ep.path === "/preflight" ? "Validation only; nothing is printed." : "This will print for real.") : null;
-	form.append(el("div", { class: "actions" }, send, hint), el("div", { class: "response" }, status, output, jobBox));
+	form.append(el("div", { class: "actions" }, send, retrySame, newJob, hint), el("div", { class: "response" }, status, output, jobBox));
 
 	// code samples
 	const codePre = el("pre");
@@ -750,7 +872,116 @@ function renderEndpoint(ep) {
 	form.addEventListener("input", refreshCode);
 	form.addEventListener("change", refreshCode);
 
-	form.addEventListener("submit", async (e) => {
+	let pendingPrint = null;
+	const setPrintInputsDisabled = (disabled) => {
+		if (!ep.follow) return;
+		for (const input of form.querySelectorAll("input, select, textarea")) input.disabled = disabled;
+	};
+	const runRequest = async (request, message) => {
+		send.disabled = true;
+		retrySame.hidden = true;
+		newJob.hidden = true;
+		retrySame.disabled = true;
+		output.hidden = true;
+		jobBox.hidden = true;
+		status.textContent = `${message}…`;
+		const t0 = performance.now();
+		let res;
+		let text;
+		let timeout;
+		try {
+			const init = { ...request.init };
+			if (ep.follow) {
+				const controller = new AbortController();
+				init.signal = controller.signal;
+				timeout = setTimeout(() => controller.abort(), 30000);
+			}
+			res = await api(request.url, init, request.auth);
+			text = await res.text();
+		} catch (err) {
+			status.replaceChildren(el("span", { class: "status-err" }, `Failed: ${err.message}`));
+			if (ep.follow) {
+				pendingPrint = request;
+				setPrintInputsDisabled(true);
+				retrySame.hidden = false;
+				jobBox.hidden = false;
+				jobBox.className = "job";
+				jobBox.textContent = "A complete response was not received. Retry this exact request with the same key; do not create another print yet.";
+			} else {
+				send.disabled = false;
+			}
+			retrySame.disabled = false;
+			return;
+		} finally {
+			if (timeout) clearTimeout(timeout);
+		}
+
+		const ms = Math.round(performance.now() - t0);
+		let data = null;
+		try {
+			data = text ? JSON.parse(text) : null;
+			output.textContent = data == null ? text : JSON.stringify(data, null, 2);
+		} catch {
+			output.textContent = text;
+		}
+		output.hidden = false;
+		status.replaceChildren(
+			el("span", { class: res.ok ? "status-ok" : "status-err" }, `${res.status} ${res.statusText}`),
+			el("span", {}, `${ms} ms`));
+
+		if (ep.follow && data?.code === "outcome_unknown") {
+			pendingPrint = request;
+			setPrintInputsDisabled(true);
+			send.disabled = true;
+			newJob.hidden = false;
+			jobBox.hidden = false;
+			jobBox.className = "job";
+			jobBox.textContent = "ix.print cannot confirm the result. Check History and the operating-system printer queue first. Print as a new job sends the same saved request with a new key. No automatic resubmission was made.";
+			return;
+		}
+
+		if (ep.follow && res.ok && (!data || typeof data !== "object" || Array.isArray(data) || typeof data.job_id !== "string" || !data.job_id.trim())) {
+			pendingPrint = request;
+			setPrintInputsDisabled(true);
+			send.disabled = true;
+			retrySame.hidden = false;
+			retrySame.disabled = false;
+			jobBox.hidden = false;
+			jobBox.className = "job";
+			jobBox.textContent = "Print may have been accepted, but the response did not include a valid job_id. Retry the exact request with the same key; do not create a new print yet.";
+			return;
+		}
+
+		pendingPrint = null;
+		setPrintInputsDisabled(false);
+		send.disabled = false;
+		if (res.ok && ep.follow && data?.job_id) {
+			jobBox.hidden = false;
+			jobBox.className = "job";
+			jobBox.textContent = "Checking job status…";
+			follow(data.job_id, jobBox, request.auth);
+			const idInput = document.getElementById("job-status-job_id");
+			if (idInput) idInput.value = data.job_id;
+		}
+	};
+
+	retrySame.addEventListener("click", () => {
+		if (pendingPrint) runRequest(pendingPrint, "Retrying the same request");
+	});
+	newJob.addEventListener("click", () => {
+		if (!pendingPrint) return;
+		const request = {
+			...pendingPrint,
+			init: {
+				...pendingPrint.init,
+				headers: { ...(pendingPrint.init.headers || {}), "Idempotency-Key": newIdempotencyKey() },
+			},
+		};
+		pendingPrint = request;
+		runRequest(request, "Printing as a new job");
+	});
+
+	form.addEventListener("submit", (e) => {
 		e.preventDefault();
 		const qs = queryOf(form);
 		const url = `${BASE}${ep.path}${qs ? "?" + qs : ""}`;
@@ -771,36 +1002,10 @@ function renderEndpoint(ep) {
 			init.headers = { "Content-Type": "application/json" };
 			init.body = text;
 		}
-		send.disabled = true;
-		jobBox.hidden = true;
-		status.textContent = "Sending…";
-		const t0 = performance.now();
-		try {
-			const res = await api(url, init);
-			const text = await res.text();
-			const ms = Math.round(performance.now() - t0);
-			status.replaceChildren(
-				el("span", { class: res.ok ? "status-ok" : "status-err" }, `${res.status} ${res.statusText}`),
-				el("span", {}, `${ms} ms`));
-			let data = null;
-			try {
-				data = JSON.parse(text);
-				output.textContent = JSON.stringify(data, null, 2);
-			} catch {
-				output.textContent = text;
-			}
-			output.hidden = false;
-			if (res.ok && ep.follow && data && data.job_id) {
-				jobBox.hidden = false;
-				follow(data.job_id, jobBox);
-				const idInput = document.getElementById("job-status-job_id");
-				if (idInput) idInput.value = data.job_id;
-			}
-		} catch (err) {
-			status.replaceChildren(el("span", { class: "status-err" }, `Failed: ${err.message}`));
-		} finally {
-			send.disabled = false;
-		}
+		if (ep.follow) init.headers = { ...(init.headers || {}), "Idempotency-Key": newIdempotencyKey() };
+		const request = { url, init, auth: authHeaders() };
+		if (ep.follow) setPrintInputsDisabled(true);
+		runRequest(request, "Sending");
 	});
 
 	const params = ep.params.length

@@ -25,8 +25,10 @@ use the computer's current LAN address and configured port (default `18032`).
 Allow that port through the host firewall only on the trusted private network.
 If the bridge is loopback-only, a remote browser or LAN server cannot reach it.
 The standard bridge uses HTTP; use a trusted LAN or a TLS reverse proxy where
-the network is not trusted. Never put an API token in a URL or source-control
-example.
+the network is not trusted. Use `Authorization: Bearer <token>` for new
+integrations. The `?token=` query form remains accepted for compatibility, but
+avoid it: URLs can be exposed through browser history, copied links, or
+intermediary logs. Do not include real API tokens in examples or source control.
 
 ## Browser origin, token, and Local Network Access
 
@@ -57,8 +59,10 @@ Only call `POST /print` if the HTTP request succeeds and the response says
 `valid: true`. For each deliberate logical print, use one unique
 `Idempotency-Key` (1–128 visible ASCII characters). On timeout or a lost
 response, retry the same payload and settings with the **same key**. A changed
-payload or settings with that key returns HTTP 409 fingerprint conflict. Make a
-new key only when the user deliberately requests a new print.
+payload or settings with that key returns HTTP 409 fingerprint conflict. Keys
+are retained for 24 hours and scoped to the API token (or client IP when tokens
+are optional). Make a new key only when the user deliberately requests a new
+print.
 
 | Response | Meaning and client action |
 |---|---|
